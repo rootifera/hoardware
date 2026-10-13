@@ -651,7 +651,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           {error}
         </p>
       )}
-      <DialogFooter className="sticky bottom-0 z-10 bg-muted">
+      <DialogFooter className="sticky bottom-0 z-10 mt-5 bg-muted shadow-[0_-10px_12px_-10px_rgba(0,0,0,0.35)]">
         <Button type="button" variant="outline" disabled={saving} onClick={() => void save("another")}>
           Save &amp; add another
         </Button>
