@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from sqlalchemy import Select, and_, false, func, or_, select
+from sqlalchemy import Select, String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.enums import Condition, IdentificationConfidence, TestStatus
@@ -13,7 +13,7 @@ from app.models import Category, Item, Location
 MAX_TOKENS = 8
 _NUMERIC = re.compile(r"^(?:hw-?)?(\d{1,9})$")
 
-SORTS = ("newest", "name", "category", "location")
+SORTS = ("newest", "name", "category", "location", "position")
 
 
 @dataclass
@@ -89,6 +89,10 @@ def sort_key(sort: str):
         return func.lower(Category.name), False
     if sort == "location":
         return func.coalesce(Location.full_name, ""), False
+    if sort == "position":
+        # Position first (items without one last), then name: shelf order.
+        number = func.lpad(func.coalesce(cast(Item.order, String), "9999999999"), 10, "0")
+        return number + " " + Item.sort_name, False
     raise HTTPException(422, f"unknown sort: {sort}")
 
 
@@ -100,4 +104,23 @@ def cursor_value(sort: str, row) -> object:
         return row.sort_name
     if sort == "category":
         return row.category_name.lower()
+    if sort == "position":
+        number = row.order if row.order is not None else 9999999999
+        return f"{number:010d} {row.sort_name}"
     return row.location_path or ""
+
+
+def ensure_position_free(session: Session, location_id: int | None, order: int | None, item_id: int | None = None) -> None:
+    """Two items cannot share the same exact spot: a position is unique within
+    its location. (The unique index enforces it under concurrency; this gives
+    the friendly message.)"""
+    if order is None:
+        return
+    if location_id is None:
+        raise HTTPException(422, "a position only makes sense inside a location; choose a location first")
+    taken = session.scalar(
+        select(Item.inventory_code).where(Item.location_id == location_id, Item.order == order, Item.id != (item_id or -1))
+    )
+    if taken:
+        location = session.get(Location, location_id)
+        raise HTTPException(409, f"{location.full_name} position {order} is already taken by {taken}")

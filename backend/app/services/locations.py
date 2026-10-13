@@ -5,11 +5,14 @@ Each row stores ``path`` ("/1/5/9/", ids from the root to the row itself) and
 prefix matches on an indexed column, and results can show the full path
 without joins. All structural writes take one advisory lock so concurrent
 moves cannot race into a cycle.
+
+Locations are plain containers with an optional free-text ``type``; sibling
+names may repeat. An item's exact spot inside a location is its ``order``
+(see app.services.items).
 """
 
 from fastapi import HTTPException
 from sqlalchemy import exists, select, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Item, Location
@@ -18,7 +21,8 @@ SEPARATOR = " > "
 _LOCK_KEY = 0x484F4152  # "HOAR"
 
 
-def _lock(session: Session) -> None:
+def lock_structure(session: Session) -> None:
+    """Serialise structural changes for this transaction."""
     session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _LOCK_KEY})
 
 
@@ -36,20 +40,12 @@ def _parent_or_422(session: Session, parent_id: int) -> Location:
     return parent
 
 
-def _conflict() -> HTTPException:
-    return HTTPException(409, "a sibling location with this name already exists")
-
-
-def create_location(session: Session, name: str, parent_id: int | None, notes: str | None) -> Location:
-    _lock(session)
+def create_location(session: Session, name: str, parent_id: int | None, notes: str | None, type_: str | None = None) -> Location:
+    lock_structure(session)
     parent = _parent_or_422(session, parent_id) if parent_id is not None else None
-    location = Location(name=name, parent_id=parent_id, notes=notes)
+    location = Location(name=name, parent_id=parent_id, notes=notes, type=type_)
     session.add(location)
-    try:
-        session.flush()
-    except IntegrityError:
-        session.rollback()
-        raise _conflict() from None
+    session.flush()
     location.path = f"{parent.path if parent else '/'}{location.id}/"
     location.full_name = f"{parent.full_name}{SEPARATOR}{name}" if parent else name
     session.commit()
@@ -57,7 +53,7 @@ def create_location(session: Session, name: str, parent_id: int | None, notes: s
 
 
 def update_location(session: Session, location_id: int, changes: dict) -> Location:
-    _lock(session)
+    lock_structure(session)
     location = _get_or_404(session, location_id)
 
     new_name = changes.get("name", location.name)
@@ -65,6 +61,8 @@ def update_location(session: Session, location_id: int, changes: dict) -> Locati
     new_parent_id = changes["parent_id"] if "parent_id" in changes else location.parent_id
     if "notes" in changes:
         location.notes = changes["notes"]
+    if "type" in changes:
+        location.type = changes["type"]
 
     if new_name != location.name or moving:
         parent = None
@@ -81,11 +79,7 @@ def update_location(session: Session, location_id: int, changes: dict) -> Locati
 
         location.name = new_name
         location.parent_id = new_parent_id
-        try:
-            session.flush()
-        except IntegrityError:
-            session.rollback()
-            raise _conflict() from None
+        session.flush()
 
         # Rewrite this row and every descendant in one statement.
         session.execute(
@@ -109,7 +103,7 @@ def update_location(session: Session, location_id: int, changes: dict) -> Locati
 
 
 def delete_location(session: Session, location_id: int) -> None:
-    _lock(session)
+    lock_structure(session)
     location = _get_or_404(session, location_id)
     if session.scalar(select(exists().where(Location.parent_id == location.id))):
         raise HTTPException(409, "location has child locations; move or delete them first")

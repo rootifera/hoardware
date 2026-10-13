@@ -81,7 +81,7 @@ def test_default_order_is_newest_first(client, make_item):
     assert models(client, order="asc") == ["first", "second", "third"]
 
 
-@pytest.mark.parametrize("sort", ["newest", "name", "category", "location"])
+@pytest.mark.parametrize("sort", ["newest", "name", "category", "location", "position"])
 @pytest.mark.parametrize("order", ["asc", "desc"])
 def test_cursor_pagination_visits_every_row_once_in_order(client, make_item, make_location, sort, order):
     shelf_a, shelf_b = make_location("A"), make_location("B")

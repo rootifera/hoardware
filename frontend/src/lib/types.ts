@@ -26,6 +26,8 @@ export interface Location {
   name: string;
   parent_id: number | null;
   notes: string | null;
+  /** Free-text label: shelf, box, drawer, … */
+  type: string | null;
   full_name: string;
   has_children: boolean;
 }
@@ -63,6 +65,8 @@ export interface ItemSummary {
   identification_confidence: Confidence;
   location_id: number | null;
   location_path: string | null;
+  /** Exact position inside the location (unique per location). */
+  order: number | null;
   thumbnail_url: string | null;
   created_at: string;
   updated_at: string;
@@ -136,6 +140,7 @@ export interface ItemCreate {
   condition?: Condition;
   test_status?: TestStatus;
   location_id?: number | null;
+  order?: number | null;
   notes?: string | null;
 }
 
@@ -153,6 +158,7 @@ export type ItemUpdate = Partial<
     | "test_status"
     | "test_notes"
     | "location_id"
+    | "order"
     | "notes"
     | "acquired_on"
     | "identification_confidence"
@@ -160,7 +166,7 @@ export type ItemUpdate = Partial<
   >
 >;
 
-export const SORTS = ["newest", "name", "category", "location"] as const;
+export const SORTS = ["newest", "name", "category", "location", "position"] as const;
 export type Sort = (typeof SORTS)[number];
 
 export interface ItemFilters {
@@ -190,3 +196,7 @@ export const EMPTY_FILTERS: ItemFilters = {
   sort: "newest",
   order: "",
 };
+
+export interface ItemBatchResult {
+  created: { id: number; inventory_code: string; location_path: string | null; order: number | null }[];
+}

@@ -55,6 +55,7 @@ interface Draft {
   test_status: TestStatus;
   test_notes: string;
   location: PickedLocation | null;
+  order: string; // position inside the location; "" = none
   notes: string;
   acquired_on: string;
   identification_confidence: Confidence;
@@ -98,6 +99,7 @@ function toDraft(item: Item): Draft {
     test_status: item.test_status,
     test_notes: text(item.test_notes),
     location: item.location_id != null ? { id: item.location_id, full_name: item.location_path ?? "" } : null,
+    order: item.order !== null ? String(item.order) : "",
     notes: text(item.notes),
     acquired_on: text(item.acquired_on),
     identification_confidence: item.identification_confidence,
@@ -125,6 +127,8 @@ function diff(item: Item, d: Draft): ItemUpdate {
   if (d.test_status !== item.test_status) patch.test_status = d.test_status;
   if (nullable(d.test_notes) !== item.test_notes) patch.test_notes = nullable(d.test_notes);
   if ((d.location?.id ?? null) !== item.location_id) patch.location_id = d.location?.id ?? null;
+  const order = d.order.trim() === "" ? null : Number(d.order);
+  if (order !== item.order) patch.order = order;
   if (nullable(d.notes) !== item.notes) patch.notes = nullable(d.notes);
   if ((d.acquired_on || null) !== item.acquired_on) patch.acquired_on = d.acquired_on || null;
   if (d.identification_confidence !== item.identification_confidence) patch.identification_confidence = d.identification_confidence;
@@ -186,6 +190,12 @@ function ItemEditor({ item }: { item: Item }) {
 
   const [draft, setDraft] = useState<Draft>(() => toDraft(item));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Suggestion for the position field: the next free spot in the chosen location.
+  const nextFree = useQuery({
+    queryKey: ["next-position", draft.location?.id],
+    queryFn: () => api.nextPosition(draft.location!.id),
+    enabled: draft.location !== null,
+  });
 
   const patch = diff(item, draft);
   const dirty = Object.keys(patch).length > 0;
@@ -337,7 +347,23 @@ function ItemEditor({ item }: { item: Item }) {
           <section className="grid gap-4 sm:grid-cols-2">
             <h2 className="text-sm font-medium text-muted-foreground sm:col-span-2">Where &amp; when</h2>
             <Field label="Location" htmlFor="f-loc">
-              <LocationPicker id="f-loc" value={draft.location} onChange={(l) => set("location", l)} />
+              <LocationPicker
+                id="f-loc"
+                value={draft.location}
+                // A position belongs to its location, so a different location starts without one.
+                onChange={(l) => setDraft({ ...draft, location: l, order: l?.id === draft.location?.id ? draft.order : "" })}
+              />
+            </Field>
+            <Field label="Position" htmlFor="f-order" hint="The exact spot inside the location. Two items cannot share one.">
+              <Input
+                id="f-order"
+                type="number"
+                min={0}
+                disabled={!draft.location}
+                placeholder={nextFree.data !== undefined ? `next free: ${nextFree.data}` : "none"}
+                value={draft.order}
+                onChange={(e) => set("order", e.target.value)}
+              />
             </Field>
             <Field label="Acquired on" htmlFor="f-acq">
               <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />

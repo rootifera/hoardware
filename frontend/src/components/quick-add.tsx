@@ -120,8 +120,18 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
   const [notes, setNotes] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [copies, setCopies] = useState(1);
+  const [position, setPosition] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The lowest free position after the last one used in the chosen location.
+  const nextFree = useQuery({
+    queryKey: ["next-position", location?.id],
+    queryFn: () => api.nextPosition(location!.id),
+    enabled: location !== null,
+    staleTime: 0,
+  });
 
   const categoryOptions = (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }));
   // Fall back to the first category when nothing (valid) is remembered.
@@ -138,19 +148,39 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
     setError(null);
     setSaving(true);
     try {
-      const item = await api.createItem({
+      const fields = {
         category_id: Number(effectiveCategory),
         model: model.trim(),
         manufacturer: manufacturer.trim() || null,
         part_number: partNumber.trim() || null,
         condition,
         test_status: testStatus,
-        location_id: location?.id ?? null,
         notes: notes.trim() || null,
-      });
+      };
+      // A position is the item's exact spot inside the location.
+      const start = position.trim() === "" ? null : Number(position);
+      if (start !== null && (!Number.isInteger(start) || start < 0)) {
+        setSaving(false);
+        return setError("Position must be a whole number, 0 or more.");
+      }
+      if (start !== null && !location) {
+        setSaving(false);
+        return setError("Choose a location to give the item a position.");
+      }
+      // Several copies are several separate items (own code, condition, test status),
+      // at consecutive positions when a start position is given.
+      const batch =
+        copies > 1
+          ? await api.createItemsBatch({
+              item: { ...fields, location_id: location?.id ?? null },
+              copies,
+              order_start: start,
+            })
+          : null;
+      const item = batch ? null : await api.createItem({ ...fields, location_id: location?.id ?? null, order: start });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ category: effectiveCategory, location } satisfies Remembered));
       let photoNote = "";
-      if (files.length) {
+      if (item && files.length) {
         try {
           await api.uploadPhotos(item.id, files);
         } catch (e) {
@@ -159,20 +189,30 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
       }
       queryClient.invalidateQueries({ queryKey: ["items"] });
       queryClient.invalidateQueries({ queryKey: ["manufacturers"] });
+      queryClient.invalidateQueries({ queryKey: ["next-position"] });
       toast.success(
-        <span>
-          Added{" "}
-          <Link className="font-medium underline" href={`/items/${item.id}`}>
-            {item.inventory_code}
-          </Link>
-          {photoNote}
-        </span>,
+        batch ? (
+          <span>
+            Added {batch.created.length} items: {batch.created[0].inventory_code} – {batch.created.at(-1)?.inventory_code}
+          </span>
+        ) : (
+          <span>
+            Added{" "}
+            <Link className="font-medium underline" href={`/items/${item!.id}`}>
+              {item!.inventory_code}
+            </Link>
+            {photoNote}
+          </span>
+        ),
       );
       if (addAnother) {
         setModel("");
         setPartNumber("");
         setNotes("");
         setFiles([]);
+        // Carry on from the next free spot.
+        if (start !== null) setPosition(String(start + copies));
+        setCopies(1);
         modelRef.current?.focus();
       } else {
         onClose();
@@ -254,16 +294,67 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
           />
         </div>
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="qa-location">Location</Label>
-        <LocationPicker id="qa-location" value={location} onChange={setLocation} />
+      <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
+        <div className="grid gap-1.5">
+          <Label htmlFor="qa-location">Location</Label>
+          <LocationPicker
+            id="qa-location"
+            value={location}
+            onChange={(l) => {
+              setLocation(l);
+              setPosition("");
+            }}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="qa-position">Position</Label>
+          <Input
+            id="qa-position"
+            type="number"
+            min={0}
+            disabled={!location}
+            placeholder={nextFree.data !== undefined ? `next: ${nextFree.data}` : "exact spot"}
+            value={position}
+            onChange={(e) => setPosition(e.target.value)}
+          />
+        </div>
       </div>
+      {location && nextFree.data !== undefined && position === "" && (
+        <button
+          type="button"
+          className="-mt-2 justify-self-start text-xs text-muted-foreground underline"
+          onClick={() => setPosition(String(nextFree.data))}
+        >
+          Use next free position ({nextFree.data})
+        </button>
+      )}
       <div className="grid gap-1.5">
         <Label htmlFor="qa-notes">Notes</Label>
         <Textarea id="qa-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
+      <div className="grid gap-2 rounded-lg border border-dashed p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Label htmlFor="qa-copies">Copies</Label>
+          <Input
+            id="qa-copies"
+            type="number"
+            min={1}
+            max={200}
+            className="w-20"
+            value={copies}
+            onChange={(e) => setCopies(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+          />
+          <span className="text-xs text-muted-foreground">
+            {copies > 1
+              ? position.trim() !== "" && Number.isInteger(Number(position))
+                ? `${copies} separate items at positions ${position}–${Number(position) + copies - 1}.`
+                : `${copies} separate items, each with its own code.`
+              : "Identical parts are still separate items."}
+          </span>
+        </div>
+      </div>
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" render={<label htmlFor="qa-photos" className="cursor-pointer" />}>
+        <Button type="button" variant="outline" disabled={copies > 1} render={<label htmlFor="qa-photos" className="cursor-pointer" />}>
           <ImagePlus /> Add photos
         </Button>
         <input
@@ -275,7 +366,7 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
           onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
         />
         <span className="text-sm text-muted-foreground">
-          {files.length ? `${files.length} photo${files.length === 1 ? "" : "s"} selected` : "optional"}
+          {copies > 1 ? "add photos to each item afterwards" : files.length ? `${files.length} photo${files.length === 1 ? "" : "s"} selected` : "optional"}
         </span>
       </div>
       {error && (

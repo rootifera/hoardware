@@ -62,6 +62,7 @@ function ItemRow({ item }: { item: ItemSummary }) {
           <span className="flex min-w-0 items-center gap-1 truncate sm:hidden">
             <MapPin className="size-3 shrink-0" />
             {item.location_path ?? "No location"}
+            {item.order !== null && ` · #${item.order}`}
           </span>
         </div>
       </div>
@@ -70,6 +71,7 @@ function ItemRow({ item }: { item: ItemSummary }) {
         <span className="truncate" title={item.location_path ?? undefined}>
           {item.location_path ?? <span className="italic">No location</span>}
         </span>
+        {item.order !== null && <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-xs">#{item.order}</span>}
       </div>
       {/* Fixed width so the location column lines up from row to row. */}
       <div className="flex shrink-0 flex-col items-end gap-1 sm:w-40 sm:flex-row sm:items-center sm:justify-end lg:w-72">

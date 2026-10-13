@@ -46,6 +46,8 @@ class Location(Base):
     name: Mapped[str] = mapped_column(Text)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="RESTRICT"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Free-text label: shelf, box, drawer, ...
+    type: Mapped[str | None] = mapped_column(Text)
     # Materialised ancestry as "/1/5/9/" (ids, ending with this row's own id)
     # and the human-readable "Workshop > Shelf 2 > Box 3". Both are maintained
     # by app.services.locations.
@@ -83,6 +85,8 @@ class Item(Base):
     test_status: Mapped[str] = mapped_column(Text, server_default=TestStatus.UNTESTED.value)
     test_notes: Mapped[str | None] = mapped_column(Text)
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="RESTRICT"))
+    # The item's exact position inside its location. Unique per location when set.
+    order: Mapped[int | None] = mapped_column("order", Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     acquired_on: Mapped[date | None] = mapped_column(Date)
     reference_model_id: Mapped[int | None] = mapped_column(ForeignKey("reference_models.id", ondelete="SET NULL"))

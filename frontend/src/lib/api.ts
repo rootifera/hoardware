@@ -4,6 +4,7 @@ import type {
   ItemDetail,
   ItemFilters,
   ItemSummary,
+  ItemBatchResult,
   ItemUpdate,
   Location,
   LocationDetail,
@@ -99,10 +100,14 @@ export const api = {
     return request<Page<Location>>(`/locations?${p}`);
   },
   location: (id: number) => request<LocationDetail>(`/locations/${id}`),
-  createLocation: (body: { name: string; parent_id: number | null; notes?: string | null }) =>
+  createLocation: (body: { name: string; parent_id: number | null; notes?: string | null; type?: string | null }) =>
     request<LocationDetail>("/locations", json("POST", body)),
-  updateLocation: (id: number, body: { name?: string; parent_id?: number | null; notes?: string | null }) =>
-    request<LocationDetail>(`/locations/${id}`, json("PATCH", body)),
+  updateLocation: (
+    id: number,
+    body: { name?: string; parent_id?: number | null; notes?: string | null; type?: string | null },
+  ) => request<LocationDetail>(`/locations/${id}`, json("PATCH", body)),
+  locationTypes: () => request<string[]>("/locations/types"),
+  nextPosition: (locationId: number) => request<number>(`/locations/${locationId}/next-position`),
   deleteLocation: (id: number) => request<void>(`/locations/${id}`, { method: "DELETE" }),
 
   items: (filters: ItemFilters, cursor: string | null, limit = 50) => {
@@ -120,6 +125,8 @@ export const api = {
     return request<Page<ItemSummary>>(`/items?${p}`).then((page) => page.total ?? 0);
   },
   item: (id: number) => request<ItemDetail>(`/items/${id}`),
+  createItemsBatch: (body: { item: ItemCreate; copies: number; order_start: number | null }) =>
+    request<ItemBatchResult>("/items/batch", json("POST", body)),
   createItem: (body: ItemCreate) => request<ItemDetail>("/items", json("POST", body)),
   updateItem: (id: number, body: ItemUpdate) => request<ItemDetail>(`/items/${id}`, json("PATCH", body)),
   deleteItem: (id: number) => request<void>(`/items/${id}`, { method: "DELETE" }),

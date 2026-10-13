@@ -86,7 +86,7 @@ export function LocationPicker({
             <button
               key={l.id}
               type="button"
-              className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
               onClick={() => {
                 onChange({ id: l.id, full_name: l.full_name });
                 setOpen(false);
@@ -94,6 +94,7 @@ export function LocationPicker({
               }}
             >
               <span className="truncate">{l.full_name}</span>
+              {l.type && <span className="shrink-0 text-xs text-muted-foreground">{l.type}</span>}
             </button>
           ))}
           {!debounced && results.data?.next_cursor && (

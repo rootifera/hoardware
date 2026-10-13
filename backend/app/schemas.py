@@ -55,16 +55,21 @@ class CategoryOut(BaseModel):
 # --- locations ----------------------------------------------------------------
 
 
+OptType = Annotated[Annotated[str, Field(max_length=100)] | None, BeforeValidator(_blank_to_none)]
+
+
 class LocationIn(BaseModel):
     name: Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=200)]
     parent_id: int | None = None
     notes: OptText = None
+    type: OptType = None
 
 
 class LocationUpdate(BaseModel):
     name: Annotated[Annotated[str, Field(min_length=1, max_length=200)] | None, BeforeValidator(_strip)] = None
     parent_id: int | None = None
     notes: OptText = None
+    type: OptType = None
 
 
 class LocationRef(BaseModel):
@@ -77,6 +82,7 @@ class LocationOut(BaseModel):
     name: str
     parent_id: int | None
     notes: str | None
+    type: str | None
     full_name: str
     has_children: bool
 
@@ -126,6 +132,7 @@ class ItemSummary(BaseModel):
     identification_confidence: IdentificationConfidence
     location_id: int | None
     location_path: str | None
+    order: int | None
     thumbnail_url: str | None
     created_at: datetime
     updated_at: datetime
@@ -213,10 +220,33 @@ class ItemCreate(_ItemFields):
     test_status: TestStatus = TestStatus.UNTESTED
     test_notes: OptText = None
     location_id: int | None = None
+    order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
     notes: OptText = None
     acquired_on: date | None = None
     identification_confidence: IdentificationConfidence = IdentificationConfidence.UNIDENTIFIED
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class ItemBatchIn(BaseModel):
+    """Create several separate items from one description (each gets its own
+    inventory code, condition and test status)."""
+
+    item: ItemCreate
+    copies: Annotated[int, Field(ge=1, le=200)] = 1
+    # With a location chosen, copy n gets position order_start + n: ten CPUs
+    # placed at positions 1-10 of one box. Omit for copies without positions.
+    order_start: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+
+
+class ItemBatchCreated(BaseModel):
+    id: int
+    inventory_code: str
+    location_path: str | None
+    order: int | None
+
+
+class ItemBatchOut(BaseModel):
+    created: list[ItemBatchCreated]
 
 
 class ItemUpdate(_ItemFields):
@@ -233,6 +263,7 @@ class ItemUpdate(_ItemFields):
     test_status: TestStatus | None = None
     test_notes: OptText = None
     location_id: int | None = None
+    order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
     notes: OptText = None
     acquired_on: date | None = None
     identification_confidence: IdentificationConfidence | None = None

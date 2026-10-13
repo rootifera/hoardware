@@ -4,14 +4,14 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 // items; everything they create is deleted again in afterAll.
 const RUN = Date.now().toString(36);
 const created: number[] = [];
-let locationId: number | null = null;
+const locationIds: number[] = [];
 
 async function cleanup(request: APIRequestContext) {
   for (const id of created) await request.delete(`/api/v1/items/${id}`);
-  if (locationId) {
-    const children = await (await request.get(`/api/v1/locations?parent_id=${locationId}`)).json();
+  for (const id of locationIds) {
+    const children = await (await request.get(`/api/v1/locations?parent_id=${id}`)).json();
     for (const c of children.items) await request.delete(`/api/v1/locations/${c.id}`);
-    await request.delete(`/api/v1/locations/${locationId}`);
+    await request.delete(`/api/v1/locations/${id}`);
   }
 }
 
@@ -79,7 +79,7 @@ test("Unknown and Untested are separate filters; test notes persist", async ({ p
 
 test("Nested locations show items from their descendants", async ({ page, request }) => {
   const root = await (await request.post("/api/v1/locations", { data: { name: `Shelf ${RUN}` } })).json();
-  locationId = root.id;
+  locationIds.push(root.id);
   const box = await (await request.post("/api/v1/locations", { data: { name: "CPU Box 3", parent_id: root.id } })).json();
   const cats = await (await request.get("/api/v1/categories")).json();
   const item = await (
@@ -148,4 +148,49 @@ test("Reference matching is optional and stays out of the way", async ({ page, r
   await expect(page.getByText("Not matched to a reference model (optional).")).toBeVisible();
   const after = await (await request.get(`/api/v1/items/${item.id}`)).json();
   expect(after.identification_confidence).toBe("unidentified");
+});
+
+test("Ten identical CPUs sit at ten exact positions in one location", async ({ page, request }) => {
+  const tray = await (await request.post("/api/v1/locations", { data: { name: `CPU Tray ${RUN}`, type: "tray" } })).json();
+  locationIds.push(tray.id);
+  const model = `Identical CPU ${RUN}`;
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(model);
+  await qa.getByLabel("Location").click();
+  await page.getByPlaceholder(/Search locations/).fill(`cpu tray ${RUN}`);
+  await page.getByRole("button", { name: new RegExp(`^CPU Tray ${RUN}`) }).click();
+  // The empty tray offers position 1 as the next free spot.
+  await expect(qa.getByLabel("Position")).toHaveAttribute("placeholder", "next: 1");
+  await qa.getByLabel("Position").fill("1");
+  await qa.getByLabel("Copies").fill("10");
+  await expect(qa.getByText("10 separate items at positions 1–10.")).toBeVisible();
+  await qa.getByRole("button", { name: "Save & close" }).click();
+  await expect(page.getByText(/Added 10 items/)).toBeVisible();
+  await trackByModel(request, model);
+
+  // The location lists them in position order.
+  await page.goto(`/locations?id=${tray.id}`);
+  await expect(page.getByText("10 items", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^#\d+$/)).toHaveCount(10);
+  expect(await page.getByText(/^#\d+$/).allTextContents()).toEqual(Array.from({ length: 10 }, (_, i) => `#${i + 1}`));
+
+  // Each is its own item, and an exact spot cannot be shared.
+  const items = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(model)}&limit=50`)).json()).items;
+  expect(new Set(items.map((i: { inventory_code: string }) => i.inventory_code)).size).toBe(10);
+  const refused = await request.post("/api/v1/items", {
+    data: { category_id: items[0].category_id, model: "interloper", location_id: tray.id, order: 3 },
+  });
+  expect(refused.status()).toBe(409);
+  expect((await refused.json()).detail).toContain("position 3 is already taken");
+
+  // The item page shows and edits the position, and a taken one is refused.
+  await page.goto(`/items/${items.find((i: { order: number }) => i.order === 2).id}`);
+  await expect(page.getByLabel("Position")).toHaveValue("2");
+  await page.getByLabel("Position").fill("3");
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await expect(page.getByText(/position 3 is already taken/)).toBeVisible();
 });

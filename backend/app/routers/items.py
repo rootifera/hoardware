@@ -1,15 +1,27 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.enums import Condition, IdentificationConfidence, TestStatus
 from app.models import Category, Item, Location, Photo, ReferenceModel
 from app.pagination import apply_keyset, encode_cursor, decode_cursor
-from app.schemas import ItemCreate, ItemDetail, ItemSummary, ItemUpdate, Page, PhotoOut
+from app.schemas import (
+    ItemBatchCreated,
+    ItemBatchIn,
+    ItemBatchOut,
+    ItemCreate,
+    ItemDetail,
+    ItemSummary,
+    ItemUpdate,
+    Page,
+    PhotoOut,
+)
 from app.services import items as item_service
+from app.services import locations as location_service
 from app.services import reference as reference_service
 from app.services.items import ItemFilters
 from app.services.photos import process_pending_deletions, queue_deletions
@@ -60,6 +72,7 @@ SUMMARY_COLUMNS = (
     Item.identification_confidence,
     Item.location_id,
     Location.full_name.label("location_path"),
+    Item.order,
     Item.created_at,
     Item.updated_at,
     Item.sort_name,
@@ -148,11 +161,23 @@ def _check_refs(session: Session, category_id: int | None, location_id: int | No
         raise HTTPException(422, "location does not exist")
 
 
+def _commit_or_position_conflict(session: Session) -> None:
+    """Commit; losing a race for a position (caught by the unique index)
+    becomes the same 409 as the up-front check."""
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        if "uq_items_location_order" in str(exc.orig):
+            raise HTTPException(409, "that position in the location was just taken by another item") from None
+        raise
+
+
 @router.get("", response_model=Page[ItemSummary])
 def list_items(
     session: SessionDep,
     filters: FiltersDep,
-    sort: Annotated[str, Query(pattern="^(newest|name|category|location)$")] = "newest",
+    sort: Annotated[str, Query(pattern="^(newest|name|category|location|position)$")] = "newest",
     order: Annotated[str | None, Query(pattern="^(asc|desc)$")] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     cursor: str | None = None,
@@ -195,10 +220,62 @@ def get_item_by_code(inventory_code: str, session: SessionDep):
 @router.post("", response_model=ItemDetail, status_code=201)
 def create_item(body: ItemCreate, session: SessionDep):
     _check_refs(session, body.category_id, body.location_id)
+    item_service.ensure_position_free(session, body.location_id, body.order)
     item = Item(**body.model_dump(mode="json", exclude={"acquired_on"}), acquired_on=body.acquired_on)
     session.add(item)
-    session.commit()
+    _commit_or_position_conflict(session)
     return load_detail(session, item.id)
+
+
+@router.post("/batch", response_model=ItemBatchOut, status_code=201)
+def create_items_batch(body: ItemBatchIn, session: SessionDep):
+    """Create N separate items from one description. With ``order_start`` and a
+    location, copy n takes position ``order_start + n``. All or nothing."""
+    template = body.item
+    if session.get(Category, template.category_id) is None:
+        raise HTTPException(422, "category does not exist")
+    if body.order_start is not None and template.location_id is None:
+        raise HTTPException(422, "positions need a location; choose one or omit order_start")
+    if template.order is not None:
+        raise HTTPException(422, "use order_start (not item.order) when creating several copies")
+
+    location = None
+    if template.location_id is not None:
+        location = session.get(Location, template.location_id)
+        if location is None:
+            raise HTTPException(422, "location does not exist")
+    if body.order_start is not None:
+        wanted = range(body.order_start, body.order_start + body.copies)
+        taken = dict(
+            session.execute(
+                select(Item.order, Item.inventory_code).where(Item.location_id == location.id, Item.order.in_(list(wanted)))
+            ).all()
+        )
+        if taken:
+            first = min(taken)
+            raise HTTPException(
+                409,
+                f"{location.full_name} position {first} is already taken by {taken[first]}"
+                + (f" (and {len(taken) - 1} more)" if len(taken) > 1 else "")
+                + "; nothing was created",
+            )
+
+    fields = template.model_dump(mode="json", exclude={"acquired_on", "order"})
+    created: list[Item] = []
+    for index in range(body.copies):
+        order = body.order_start + index if body.order_start is not None else None
+        item = Item(**fields, acquired_on=template.acquired_on, order=order)
+        session.add(item)
+        created.append(item)
+    _commit_or_position_conflict(session)
+    return ItemBatchOut(
+        created=[
+            ItemBatchCreated(
+                id=i.id, inventory_code=i.inventory_code, location_path=location.full_name if location else None, order=i.order
+            )
+            for i in created
+        ]
+    )
 
 
 @router.get("/{item_id}", response_model=ItemDetail)
@@ -213,9 +290,17 @@ def update_item(item_id: int, body: ItemUpdate, session: SessionDep):
         raise HTTPException(404, "item not found")
     changes = body.model_dump(exclude_unset=True)
     _check_refs(session, changes.get("category_id"), changes.get("location_id"))
+    new_location = changes.get("location_id", item.location_id)
+    if "location_id" in changes and changes["location_id"] != item.location_id and "order" not in changes:
+        changes["order"] = None  # the old position belonged to the old location
+    new_order = changes.get("order", item.order)
+    if new_order is not None and new_location is None:
+        raise HTTPException(422, "a position only makes sense inside a location; choose a location first")
+    if "order" in changes or "location_id" in changes:
+        item_service.ensure_position_free(session, new_location, new_order, item_id)
     for name, value in changes.items():
         setattr(item, name, value.value if hasattr(value, "value") else value)
-    session.commit()
+    _commit_or_position_conflict(session)
     return load_detail(session, item_id)
 
 

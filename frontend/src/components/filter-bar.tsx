@@ -16,6 +16,7 @@ const SORT_LABELS: Record<Sort, string> = {
   name: "Name",
   category: "Category",
   location: "Location",
+  position: "Position in location",
 };
 
 /** A text field whose (debounced) value is pushed to the URL, while URL changes

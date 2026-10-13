@@ -89,16 +89,15 @@ def test_cycles_are_rejected(client, make_location):
     assert client.get(f"{API}/locations/{a['id']}").json()["parent_id"] is None
 
 
-def test_sibling_names_are_unique_but_cousins_may_repeat(client, make_location):
+def test_sibling_locations_may_share_a_name(client, make_location):
     a = make_location("A")
-    b = make_location("B")
-    make_location("Box", a["id"])
-    make_location("Box", b["id"])
-    r = client.post(f"{API}/locations", json={"name": "box", "parent_id": a["id"]})
-    assert r.status_code == 409
-    child = make_location("Other", a["id"])
-    assert client.patch(f"{API}/locations/{child['id']}", json={"name": "BOX"}).status_code == 409
-    assert client.post(f"{API}/locations", json={"name": "A"}).status_code == 409
+    one = make_location("Box", a["id"])
+    two = make_location("Box", a["id"])  # same parent, same name: allowed
+    assert one["id"] != two["id"] and one["full_name"] == two["full_name"] == "A > Box"
+    assert make_location("Box")["parent_id"] is None
+    assert client.patch(f"{API}/locations/{two['id']}", json={"name": "Box"}).status_code == 200
+    names = [c["name"] for c in client.get(f"{API}/locations", params={"parent_id": a["id"]}).json()["items"]]
+    assert names == ["Box", "Box"]
 
 
 def test_unknown_parent_and_blank_name(client):

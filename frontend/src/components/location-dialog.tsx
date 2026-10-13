@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -19,11 +19,12 @@ export type LocationDialogState =
   | null;
 
 function initialFields(state: NonNullable<LocationDialogState>) {
-  if (state.mode === "create") return { name: "", notes: "", parent: state.parent };
+  if (state.mode === "create") return { name: "", notes: "", type: "", parent: state.parent };
   const { location } = state;
   return {
     name: location.name,
     notes: location.notes ?? "",
+    type: location.type ?? "",
     // The parent is the last ancestor, so its path is the ancestors' names.
     parent:
       location.parent_id != null
@@ -48,7 +49,9 @@ export function LocationDialog({
         <DialogHeader>
           <DialogTitle>{editing ? "Edit location" : "New location"}</DialogTitle>
           <DialogDescription>
-            {editing ? "Rename it, or change its parent to move it with everything inside." : "Boxes, shelves, rooms: nest them as deep as you like."}
+            {editing
+              ? "Rename it, or change its parent to move it with everything inside."
+              : "Create the location first, then locations inside it. An item's exact spot is its position inside a location."}
           </DialogDescription>
         </DialogHeader>
         {state && <LocationForm state={state} onClose={onClose} onSaved={onSaved} />}
@@ -69,17 +72,19 @@ function LocationForm({
   const queryClient = useQueryClient();
   const initial = initialFields(state);
   const [name, setName] = useState(initial.name);
+  const [type, setType] = useState(initial.type);
   const [notes, setNotes] = useState(initial.notes);
   const [parent, setParent] = useState<PickedLocation | null>(initial.parent);
   const editing = state.mode === "edit";
+  const types = useQuery({ queryKey: ["location-types"], queryFn: api.locationTypes, staleTime: 30_000 });
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: name.trim(), parent_id: parent?.id ?? null, notes: notes.trim() || null };
+      const body = { name: name.trim(), parent_id: parent?.id ?? null, notes: notes.trim() || null, type: type.trim() || null };
       return state.mode === "create" ? api.createLocation(body) : api.updateLocation(state.location.id, body);
     },
     onSuccess: (location) => {
-      for (const key of ["location-children", "location", "location-picker", "items"]) {
+      for (const key of ["location-children", "location", "location-picker", "location-types", "items"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       toast.success(state.mode === "create" ? "Location created" : "Location saved");
@@ -97,9 +102,28 @@ function LocationForm({
         if (name.trim()) save.mutate();
       }}
     >
-      <div className="grid gap-1.5">
-        <Label htmlFor="loc-name">Name</Label>
-        <Input id="loc-name" autoFocus autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
+        <div className="grid gap-1.5">
+          <Label htmlFor="loc-name">Name</Label>
+          <Input id="loc-name" autoFocus autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="loc-type">Type</Label>
+          <Input
+            id="loc-type"
+            list="location-type-suggestions"
+            autoComplete="off"
+            placeholder="shelf, box…"
+            maxLength={100}
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          />
+          <datalist id="location-type-suggestions">
+            {(types.data ?? []).map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="loc-parent">Inside</Label>

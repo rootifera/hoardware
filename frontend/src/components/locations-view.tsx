@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
@@ -73,8 +74,9 @@ function TreeNode({ location, depth, selectedId, onSelect }: { location: Locatio
         >
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         </button>
-        <button type="button" className="min-w-0 flex-1 truncate py-1.5 text-left" onClick={() => onSelect(location.id)}>
-          {location.name}
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left" onClick={() => onSelect(location.id)}>
+          <span className="truncate">{location.name}</span>
+          {location.type && <span className="shrink-0 text-xs text-muted-foreground">{location.type}</span>}
         </button>
       </div>
       {expanded && location.has_children && (
@@ -129,8 +131,9 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
           ))}
         </nav>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight">
             <MapPin className="size-5 text-muted-foreground" /> {l.name}
+            {l.type && <Badge variant="secondary">{l.type}</Badge>}
           </h2>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => openQuickAdd({ location: { id: l.id, full_name: l.full_name } })}>
@@ -155,7 +158,7 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
           <input type="checkbox" className="size-4 accent-primary" checked={!exact} onChange={(e) => setExact(!e.target.checked)} />
           Include items in sub-locations
         </label>
-        <ItemList filters={{ ...EMPTY_FILTERS, location: String(id), exact }} />
+        <ItemList filters={{ ...EMPTY_FILTERS, location: String(id), exact, sort: "position" }} />
         <p className="text-xs text-muted-foreground">
           <Link className="underline" href={`/?location=${id}`}>
             Open in the full inventory view

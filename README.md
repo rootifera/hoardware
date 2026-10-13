@@ -38,6 +38,7 @@ Everyday use needs no internet access. (Building the images does.)
 - **Test status vs condition**: independent. `Unknown` means testing is currently impossible (note why in *Test notes*); `Untested` means not tried yet.
 - **Every physical item is its own record** with its own code (`HW-000001`, never reused), so identical parts can differ in location, condition and test result.
 - **Locations**: a tree (`Workshop > Shelf 2 > CPU Box 3`); moving or renaming a location updates everything inside it.
+- **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Copies** = 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
 - **CSV export**: the **CSV** button exports the current filter (streamed, so it works at any size).
 
 ## Photo storage
