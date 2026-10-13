@@ -67,3 +67,8 @@ Neither dataset can identify a board. `Brand` is always the chip vendor; probing
 2. Reference records need: kind (`cpu`, `gpu_chipset`, …), upstream identity string, content hash (for added/changed/unchanged reporting), raw specs as JSONB, per-import provenance (source id, name, URL, licence, source version, imported-at).
 3. CPU-DB: parse positionally, pad, trim, keep `NA`/blank distinct, dedupe exact duplicates, report ambiguous groups.
 4. GPU: keep only the adapter interface in v0.1; a chipset-level adapter over a user-exported JSON/CSV can follow once a licence position is chosen.
+
+
+## Update: the S-Spec table is now used
+
+`supplemental_db/cpu-db.supplemetal.Intel.S-Spec_numbers.csv` (6,182 rows: S-Spec, speed, bus speed, L2 size, package, order code) is read by the importer when present. Matching main records (joined on the S-Spec token inside their part number, Intel only) gain **Bus speed** and any speed/cache/package they lacked; the main file's own values always win. S-Specs absent from the main files become records of their own (`sspec|<code>`, about 1,260). Measured on the real data: 4,271 existing records changed, 1,262 added, 26,806 in total, and a repeat import changes nothing. The table has the same limitation as the main file: no marketing names ("300A"), no socket or stepping.

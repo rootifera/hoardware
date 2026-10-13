@@ -131,3 +131,28 @@ def test_with_total(client, make_item):
 def test_empty_result_has_no_cursor(client):
     page = client.get(f"{API}/items").json()
     assert page == {"items": [], "next_cursor": None, "total": None}
+
+
+def test_test_status_facets_ignore_their_own_filter_but_respect_the_others(client, make_item, cats):
+    make_item("a", category="CPU")
+    make_item("b", category="CPU", test_status="Unknown")
+    make_item("c", category="CPU", test_status="Dead")
+    make_item("d", category="GPU/VGA", test_status="Dead")
+    everything = client.get(f"{API}/items/facets").json()
+    assert everything == {"Unknown": 1, "Untested": 1, "POST": 0, "Full Test": 0, "Dead": 2}
+    cpus = client.get(f"{API}/items/facets", params={"category_id": cats["CPU"]}).json()
+    assert cpus == {"Unknown": 1, "Untested": 1, "POST": 0, "Full Test": 0, "Dead": 1}
+    # Its own filter is ignored: filtering to Dead still reports every status.
+    assert client.get(f"{API}/items/facets", params={"category_id": cats["CPU"], "test_status": "Dead"}).json() == cpus
+    assert client.get(f"{API}/items/facets", params={"q": "nothing matches"}).json() == {"Unknown": 0, "Untested": 0, "POST": 0, "Full Test": 0, "Dead": 0}
+
+
+def test_search_also_finds_test_notes(client, make_item):
+    make_item("Pentium Pro", test_status="Unknown", test_notes="Requires Socket 8 motherboard")
+    make_item("Pentium MMX")
+    assert models(client, q="socket 8") == ["Pentium Pro"]
+    assert models(client, q="requires motherboard pentium") == ["Pentium Pro"]
+    item = client.get(f"{API}/items", params={"q": "socket 8"}).json()["items"][0]
+    client.patch(f"{API}/items/{item['id']}", json={"test_notes": "works fine now"})
+    assert models(client, q="socket 8") == []
+    assert models(client, q="works fine") == ["Pentium Pro"]

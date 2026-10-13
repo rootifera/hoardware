@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api";
-import { CONDITIONS, CONFIDENCES, EMPTY_FILTERS, TEST_STATUSES, type ItemFilters, type Sort } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { CONDITIONS, CONFIDENCES, EMPTY_FILTERS, type ItemFilters, type Sort } from "@/lib/types";
 
 const SORT_LABELS: Record<Sort, string> = {
   newest: "Latest added",
@@ -18,6 +19,39 @@ const SORT_LABELS: Record<Sort, string> = {
   location: "Location",
   position: "Position in location",
 };
+
+/** Stock-take: when an item was last seen in place. */
+export const VERIFIED_OPTIONS = [
+  { value: "never", label: "Never verified" },
+  { value: "30", label: "Not seen in 30 days" },
+  { value: "90", label: "Not seen in 90 days" },
+  { value: "365", label: "Not seen in a year" },
+];
+
+const STATUS_CHIPS = [
+  { status: "Untested", hint: "No test attempted yet" },
+  { status: "Unknown", hint: "Cannot be determined right now, e.g. no compatible test machine" },
+  { status: "POST", hint: "Passed a basic initialisation check; not fully tested" },
+  { status: "Full Test", hint: "Completed a meaningful functional test" },
+  { status: "Dead", hint: "Confirmed non-functional" },
+] as const;
+
+function StatusChip({ active, onClick, title, children }: { active: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1 text-sm transition-colors",
+        active ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 /** A text field whose (debounced) value is pushed to the URL, while URL changes
  *  made elsewhere (e.g. "Clear") flow back into the field. */
@@ -60,6 +94,11 @@ export function FilterBar({
   const [manufacturer, setManufacturer] = useUrlText(filters.manufacturer, (value) =>
     setFilters({ manufacturer: value }, { replace: true }),
   );
+  const facets = useQuery({
+    queryKey: ["items", "facets", { ...filters, test: "", sort: "newest", order: "" }],
+    queryFn: () => api.facets(filters),
+    placeholderData: (previous) => previous,
+  });
   const suggestions = useQuery({
     queryKey: ["manufacturers", manufacturer],
     queryFn: () => api.manufacturers(manufacturer),
@@ -79,7 +118,7 @@ export function FilterBar({
 
   const dirty =
     filters.q || filters.category || filters.manufacturer || filters.condition || filters.test || filters.confidence ||
-    filters.location || filters.unassigned;
+    filters.location || filters.unassigned || filters.verified;
   const descending = filters.order ? filters.order === "desc" : filters.sort === "newest";
 
   return (
@@ -112,6 +151,18 @@ export function FilterBar({
         )}
       </div>
 
+      <div role="group" aria-label="Test status" className="flex flex-wrap items-center gap-1.5">
+        <StatusChip active={!filters.test} onClick={() => setFilters({ test: "" })}>
+          All
+        </StatusChip>
+        {STATUS_CHIPS.map(({ status, hint }) => (
+          <StatusChip key={status} active={filters.test === status} title={hint} onClick={() => setFilters({ test: filters.test === status ? "" : status })}>
+            {status}{" "}
+            {facets.data && <span className="ml-0.5 tabular-nums opacity-70">{(facets.data[status] ?? 0).toLocaleString()}</span>}
+          </StatusChip>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <SimpleSelect
           aria-label="Category"
@@ -120,14 +171,6 @@ export function FilterBar({
           onChange={(category) => setFilters({ category })}
           anyLabel="All categories"
           options={(categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
-        />
-        <SimpleSelect
-          aria-label="Test status"
-          className="w-40"
-          value={filters.test}
-          onChange={(test) => setFilters({ test })}
-          anyLabel="Any test status"
-          options={TEST_STATUSES.map((s) => ({ value: s, label: s }))}
         />
         <SimpleSelect
           aria-label="Condition"
@@ -144,6 +187,14 @@ export function FilterBar({
           onChange={(confidence) => setFilters({ confidence })}
           anyLabel="Any identification"
           options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
+        />
+        <SimpleSelect
+          aria-label="Last verified"
+          className="w-48"
+          value={filters.verified}
+          onChange={(verified) => setFilters({ verified })}
+          anyLabel="Any verification"
+          options={VERIFIED_OPTIONS}
         />
         <Input
           aria-label="Manufacturer"

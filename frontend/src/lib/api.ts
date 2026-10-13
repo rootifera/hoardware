@@ -1,5 +1,14 @@
 import type {
+  BulkChanges,
+  CategoryField,
+  TestLogEntry,
+  TestStatus,
+  ImportOptions,
+  ImportReport,
+  BulkResult,
+  BulkSelection,
   Category,
+  PositionMode,
   ItemCreate,
   ItemDetail,
   ItemFilters,
@@ -69,6 +78,13 @@ const json = (method: string, body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
+/** YYYY-MM-DD for the day `days` ago, in local time. */
+export function daysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toLocaleDateString("en-CA");
+}
+
 export function filterParams(f: ItemFilters): URLSearchParams {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set("q", f.q.trim());
@@ -77,6 +93,8 @@ export function filterParams(f: ItemFilters): URLSearchParams {
   if (f.condition) p.set("condition", f.condition);
   if (f.test) p.set("test_status", f.test);
   if (f.confidence) p.set("identification_confidence", f.confidence);
+  if (f.verified === "never") p.set("never_verified", "true");
+  else if (f.verified) p.set("verified_before", daysAgo(Number(f.verified)));
   if (f.unassigned) p.set("unassigned", "true");
   else if (f.location) {
     p.set("location_id", f.location);
@@ -87,8 +105,8 @@ export function filterParams(f: ItemFilters): URLSearchParams {
 
 export const api = {
   categories: () => request<Category[]>("/categories"),
-  createCategory: (body: { name: string; sort_order?: number }) => request<Category>("/categories", json("POST", body)),
-  updateCategory: (id: number, body: { name?: string; sort_order?: number }) =>
+  createCategory: (body: { name: string; sort_order?: number; fields?: CategoryField[] }) => request<Category>("/categories", json("POST", body)),
+  updateCategory: (id: number, body: { name?: string; sort_order?: number; fields?: CategoryField[] }) =>
     request<Category>(`/categories/${id}`, json("PATCH", body)),
   deleteCategory: (id: number) => request<void>(`/categories/${id}`, { method: "DELETE" }),
 
@@ -118,6 +136,8 @@ export const api = {
     if (cursor) p.set("cursor", cursor);
     return request<Page<ItemSummary>>(`/items?${p}`);
   },
+  /** Per-test-status counts for the other filters (the test filter itself is ignored). */
+  facets: (filters: ItemFilters) => request<Record<string, number>>(`/items/facets?${filterParams({ ...filters, test: "" })}`),
   itemCount: (filters: ItemFilters) => {
     const p = filterParams(filters);
     p.set("limit", "1");
@@ -130,6 +150,9 @@ export const api = {
   createItem: (body: ItemCreate) => request<ItemDetail>("/items", json("POST", body)),
   updateItem: (id: number, body: ItemUpdate) => request<ItemDetail>(`/items/${id}`, json("PATCH", body)),
   deleteItem: (id: number) => request<void>(`/items/${id}`, { method: "DELETE" }),
+  attributeValues: (key: string, categoryId: number) =>
+    request<string[]>(`/attribute-values?${new URLSearchParams({ key, category_id: String(categoryId) })}`),
+  attributeKeys: (categoryId: number) => request<string[]>(`/attribute-keys?category_id=${categoryId}`),
   manufacturers: (q: string) => request<string[]>(`/manufacturers?${new URLSearchParams({ q, limit: "15" })}`),
 
   uploadPhotos: (itemId: number, files: File[], role: PhotoRole = "other") => {
@@ -138,12 +161,13 @@ export const api = {
     form.append("role", role);
     return request<Photo[]>(`/items/${itemId}/photos`, { method: "POST", body: form });
   },
-  updatePhoto: (itemId: number, photoId: number, body: { role?: PhotoRole; caption?: string | null }) =>
+  updatePhoto: (itemId: number, photoId: number, body: { role?: PhotoRole; caption?: string | null; sort_order?: number }) =>
     request<Photo>(`/items/${itemId}/photos/${photoId}`, json("PATCH", body)),
   deletePhoto: (itemId: number, photoId: number) =>
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
 
   referenceSources: () => request<ReferenceSourceStatus[]>("/reference-sources"),
+  referenceSuggestions: (q: string) => request<ReferenceCandidate[]>(`/reference-suggestions?${new URLSearchParams({ q, limit: "5" })}`),
   referenceCandidates: (itemId: number) => request<ReferenceCandidate[]>(`/items/${itemId}/reference-candidates`),
   searchReference: (q: string, cursor?: string | null) => {
     const p = new URLSearchParams({ limit: "20" });
@@ -155,6 +179,31 @@ export const api = {
   linkReference: (itemId: number, referenceId: number, confidence: "candidate" | "confirmed") =>
     request<ItemDetail>(`/items/${itemId}/reference-match`, json("POST", { reference_model_id: referenceId, confidence })),
   unlinkReference: (itemId: number) => request<ItemDetail>(`/items/${itemId}/reference-match`, { method: "DELETE" }),
+
+  bulk: (selection: BulkSelection, changes: BulkChanges, opts: { positions?: PositionMode; dryRun?: boolean } = {}) =>
+    request<BulkResult>(
+      "/items/bulk",
+      json("POST", { selection, changes, positions: opts.positions ?? "clear", dry_run: opts.dryRun ?? false }),
+    ),
+
+  importItems: (file: File, o: ImportOptions) => {
+    const form = new FormData();
+    form.append("file", file);
+    const p = new URLSearchParams({
+      commit: String(o.commit),
+      skip_invalid: String(o.skipInvalid),
+      create_categories: String(o.createCategories),
+      create_locations: String(o.createLocations),
+    });
+    return request<ImportReport>(`/import/items.csv?${p}`, { method: "POST", body: form });
+  },
+  importTemplateUrl: `${BASE}/import/template.csv`,
+
+  testLog: (itemId: number) => request<TestLogEntry[]>(`/items/${itemId}/test-log`),
+  addTestLog: (itemId: number, body: { status: TestStatus; tested_on?: string | null; notes?: string | null }) =>
+    request<TestLogEntry>(`/items/${itemId}/test-log`, json("POST", body)),
+  deleteTestLog: (itemId: number, entryId: number) =>
+    request<void>(`/items/${itemId}/test-log/${entryId}`, { method: "DELETE" }),
 
   exportUrl: (filters: ItemFilters) => `${BASE}/export/items.csv?${filterParams(filters)}`,
 };

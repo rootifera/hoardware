@@ -1,16 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Plus, Save, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Copy, ExternalLink, Loader2, MoreHorizontal, Plus, Save, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { PhotoManager } from "@/components/photo-manager";
+import { useQuickAdd } from "@/components/quick-add";
 import { ReferencePanel } from "@/components/reference-panel";
 import { SimpleSelect } from "@/components/simple-select";
 import { ConditionBadge, ConfidenceBadge, TestStatusBadge } from "@/components/status";
+import { TestHistory } from "@/components/test-history";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,12 +36,14 @@ import {
   TEST_STATUSES,
   type Condition,
   type Confidence,
+  type CategoryField,
   type ItemDetail as Item,
   type ItemUpdate,
   type TestStatus,
 } from "@/lib/types";
 
-interface AttrRow {
+/** One of the item's own specs, in the order it is stored. */
+interface SpecRow {
   key: string;
   value: string;
 }
@@ -58,32 +63,22 @@ interface Draft {
   order: string; // position inside the location; "" = none
   notes: string;
   acquired_on: string;
+  verified_on: string;
   identification_confidence: Confidence;
-  attributes: AttrRow[];
+  specs: SpecRow[];
 }
+
+// Where a spec came from is shown as a source line, not as an editable field.
+const PROVENANCE_KEYS = new Set(["source", "source link"]);
 
 const text = (v: string | null) => v ?? "";
 const nullable = (v: string) => v.trim() || null;
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-function attrToText(value: unknown): string {
+function asText(value: unknown): string {
   if (typeof value === "string") return value;
   if (value !== null && typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-function attrFromText(raw: string): unknown {
-  const v = raw.trim();
-  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
-  if (v === "true") return true;
-  if (v === "false") return false;
-  if (v.startsWith("{") || v.startsWith("[")) {
-    try {
-      return JSON.parse(v);
-    } catch {
-      /* keep as text */
-    }
-  }
-  return raw;
 }
 
 function toDraft(item: Item): Draft {
@@ -102,15 +97,25 @@ function toDraft(item: Item): Draft {
     order: item.order !== null ? String(item.order) : "",
     notes: text(item.notes),
     acquired_on: text(item.acquired_on),
+    verified_on: text(item.verified_on),
     identification_confidence: item.identification_confidence,
-    attributes: Object.entries(item.attributes).map(([key, value]) => ({ key, value: attrToText(value) })),
+    specs: Object.entries(item.attributes).map(([key, value]) => ({ key, value: asText(value) })),
   };
 }
 
-function attributesOf(rows: AttrRow[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const row of rows) if (row.key.trim()) out[row.key.trim()] = attrFromText(row.value);
+/** The specs as stored: text values, blanks dropped. */
+function specsObject(rows: SpecRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of rows) if (row.key.trim() && row.value.trim()) out[row.key.trim()] = row.value;
   return out;
+}
+
+function canonical(obj: Record<string, unknown>): string {
+  const entries = Object.entries(obj)
+    .filter(([, v]) => v !== null && asText(v).trim() !== "")
+    .map(([k, v]) => [k, asText(v)] as const)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(entries);
 }
 
 /** Only the fields that differ from the saved item, as a PATCH body. */
@@ -131,18 +136,37 @@ function diff(item: Item, d: Draft): ItemUpdate {
   if (order !== item.order) patch.order = order;
   if (nullable(d.notes) !== item.notes) patch.notes = nullable(d.notes);
   if ((d.acquired_on || null) !== item.acquired_on) patch.acquired_on = d.acquired_on || null;
+  if ((d.verified_on || null) !== item.verified_on) patch.verified_on = d.verified_on || null;
   if (d.identification_confidence !== item.identification_confidence) patch.identification_confidence = d.identification_confidence;
-  if (JSON.stringify(attributesOf(d.attributes)) !== JSON.stringify(item.attributes)) patch.attributes = attributesOf(d.attributes);
+  if (canonical(specsObject(d.specs)) !== canonical(item.attributes)) patch.attributes = specsObject(d.specs);
   return patch;
 }
 
 function Field({ label, htmlFor, hint, className, children }: { label: string; htmlFor?: string; hint?: string; className?: string; children: React.ReactNode }) {
   return (
     <div className={`grid content-start gap-1.5 ${className ?? ""}`}>
-      <Label htmlFor={htmlFor}>{label}</Label>
+      <Label htmlFor={htmlFor} className="text-sm font-medium">
+        {label}
+      </Label>
       {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+/** A titled card. The page is a stack of these so each topic reads on its own. */
+function Section({ title, description, action, children }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border bg-card p-5 sm:p-6">
+      <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
+        </div>
+        {action}
+      </header>
+      {children}
+    </section>
   );
 }
 
@@ -190,6 +214,27 @@ function ItemEditor({ item }: { item: Item }) {
 
   const [draft, setDraft] = useState<Draft>(() => toDraft(item));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [focusedSpec, setFocusedSpec] = useState<string | null>(null);
+  const { open: openQuickAdd } = useQuickAdd();
+
+  // The fields this category is described with (a CPU: speed, bus, cache…).
+  const category = (categories.data ?? []).find((c) => String(c.id) === draft.category_id);
+  const profile: CategoryField[] = category?.fields ?? [];
+  const profileNames = new Set(profile.filter((f) => !f.column).map((f) => f.name.toLowerCase()));
+
+  // Values already used for the spec being edited, as suggestions.
+  const suggestions = useQuery({
+    queryKey: ["attribute-values", focusedSpec, draft.category_id],
+    queryFn: () => api.attributeValues(focusedSpec!, Number(draft.category_id)),
+    enabled: focusedSpec !== null,
+    staleTime: 60_000,
+  });
+  // Spec names used elsewhere in this category, for the "other specs" names.
+  const attributeKeys = useQuery({
+    queryKey: ["attribute-keys", draft.category_id],
+    queryFn: () => api.attributeKeys(Number(draft.category_id)),
+    staleTime: 60_000,
+  });
   // Suggestion for the position field: the next free spot in the chosen location.
   const nextFree = useQuery({
     queryKey: ["next-position", draft.location?.id],
@@ -205,6 +250,7 @@ function ItemEditor({ item }: { item: Item }) {
     onSuccess: (updated) => {
       queryClient.setQueryData(["item", id], updated);
       queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["test-log", id] }); // a status change adds an entry
       queryClient.invalidateQueries({ queryKey: ["manufacturers"] });
       toast.success("Saved");
     },
@@ -234,8 +280,26 @@ function ItemEditor({ item }: { item: Item }) {
   });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft({ ...draft, [key]: value });
-  const setAttr = (i: number, row: Partial<AttrRow>) =>
-    set("attributes", draft.attributes.map((r, idx) => (idx === i ? { ...r, ...row } : r)));
+
+  // --- specs: profile fields read and write rows by name (case-insensitive) ----
+  const specIndex = (name: string) => draft.specs.findIndex((r) => same(r.key, name));
+  const specValue = (name: string) => draft.specs[specIndex(name)]?.value ?? "";
+  const setSpec = (name: string, value: string) => {
+    const i = specIndex(name);
+    set("specs", i >= 0 ? draft.specs.map((r, idx) => (idx === i ? { ...r, value } : r)) : [...draft.specs, { key: name, value }]);
+  };
+  const extras = draft.specs
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !profileNames.has(row.key.trim().toLowerCase()) && !PROVENANCE_KEYS.has(row.key.trim().toLowerCase()));
+  const sourceName = draft.specs.find((r) => same(r.key, "Source"))?.value;
+  const sourceLink = draft.specs.find((r) => same(r.key, "Source link"))?.value;
+  const columnValue = (c: NonNullable<CategoryField["column"]>) => draft[c];
+  // Column-backed fields (chipset, revision) show when the category has them,
+  // or when the item already has a value, so nothing is ever hidden.
+  const extraColumns = (["chipset_manufacturer", "chipset", "revision"] as const).filter(
+    (c) => !profile.some((f) => f.column === c) && columnValue(c).trim() !== "",
+  );
+  const columnLabels = { chipset_manufacturer: "Chipset maker", chipset: "Chipset", revision: "Revision" } as const;
 
   return (
     <div className="space-y-6">
@@ -243,173 +307,288 @@ function ItemEditor({ item }: { item: Item }) {
         <Link href="/" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" /> Inventory
         </Link>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm text-muted-foreground">{item.inventory_code}</span>
-              <span className="text-sm text-muted-foreground">· {item.category_name}</span>
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">{[item.manufacturer, item.model].filter(Boolean).join(" ")}</h1>
-            <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-mono">{item.inventory_code}</span> · {item.category_name}
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight">{[item.manufacturer, item.model].filter(Boolean).join(" ")}</h1>
+            {item.spec_line && <p className="text-base text-muted-foreground">{item.spec_line}</p>}
+            <div className="flex flex-wrap items-center gap-2">
               <TestStatusBadge status={item.test_status} />
               <ConditionBadge condition={item.condition} />
               <ConfidenceBadge confidence={item.identification_confidence} />
+              <span className="pl-1 text-sm text-muted-foreground">
+                {item.last_tested_on ? `Last tested ${item.last_tested_on}` : "No test logged yet"}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" disabled={!dirty || save.isPending} onClick={() => setDraft(toDraft(item))}>
-              <Undo2 /> Revert
-            </Button>
+            {dirty && (
+              <Button variant="ghost" disabled={save.isPending} onClick={() => setDraft(toDraft(item))}>
+                <Undo2 /> Revert
+              </Button>
+            )}
             <Button disabled={!dirty || save.isPending || !draft.model.trim()} onClick={() => save.mutate()}>
               {save.isPending ? <Loader2 className="animate-spin" /> : <Save />} Save
             </Button>
-            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
-              <Trash2 /> Delete
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="More actions" />}>
+                <MoreHorizontal />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() =>
+                    openQuickAdd({
+                      category: String(item.category_id),
+                      model: item.model,
+                      manufacturer: item.manufacturer ?? "",
+                      partNumber: item.part_number ?? "",
+                      location: item.location_id != null ? { id: item.location_id, full_name: item.location_path ?? "" } : undefined,
+                    })
+                  }
+                >
+                  <Copy /> Add another like this
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 /> Delete this item
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_22rem]">
-        <div className="grid min-w-0 content-start gap-8">
-        <form
-          className="grid gap-8"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (dirty) save.mutate();
-          }}
-        >
-          <section className="grid gap-4 sm:grid-cols-2">
-            <h2 className="text-sm font-medium text-muted-foreground sm:col-span-2">Identification</h2>
-            <Field label="Category" htmlFor="f-category">
-              <SimpleSelect
-                id="f-category"
-                className="w-full"
-                value={draft.category_id}
-                onChange={(v) => v && set("category_id", v)}
-                options={(categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
-              />
-            </Field>
-            <Field label="Model / description" htmlFor="f-model">
-              <Input id="f-model" value={draft.model} onChange={(e) => set("model", e.target.value)} />
-            </Field>
-            <Field label="Manufacturer" htmlFor="f-manufacturer" hint="Board / card / part maker">
-              <Input id="f-manufacturer" value={draft.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
-            </Field>
-            <Field label="Part number" htmlFor="f-pn">
-              <Input id="f-pn" value={draft.part_number} onChange={(e) => set("part_number", e.target.value)} />
-            </Field>
-            <Field label="Revision" htmlFor="f-rev">
-              <Input id="f-rev" value={draft.revision} onChange={(e) => set("revision", e.target.value)} />
-            </Field>
-            <Field label="Identification" htmlFor="f-conf" hint="How sure are you about the exact model?">
-              <SimpleSelect
-                id="f-conf"
-                className="w-full"
-                value={draft.identification_confidence}
-                onChange={(v) => set("identification_confidence", v as Confidence)}
-                options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
-              />
-            </Field>
-            <Field label="Chipset maker" htmlFor="f-cm" hint="e.g. NVIDIA. The chip, not the board.">
-              <Input id="f-cm" value={draft.chipset_manufacturer} onChange={(e) => set("chipset_manufacturer", e.target.value)} />
-            </Field>
-            <Field label="Chipset" htmlFor="f-chipset" hint="e.g. RIVA TNT2 Ultra">
-              <Input id="f-chipset" value={draft.chipset} onChange={(e) => set("chipset", e.target.value)} />
-            </Field>
-          </section>
-
-          <section className="grid gap-4 sm:grid-cols-2">
-            <h2 className="text-sm font-medium text-muted-foreground sm:col-span-2">Condition &amp; testing</h2>
-            <Field label="Physical condition" htmlFor="f-cond" hint="Appearance only, not whether it works.">
-              <SimpleSelect
-                id="f-cond"
-                className="w-full"
-                value={draft.condition}
-                onChange={(v) => set("condition", v as Condition)}
-                options={CONDITIONS.map((c) => ({ value: c, label: c }))}
-              />
-            </Field>
-            <Field label="Test status" htmlFor="f-test" hint="Unknown = cannot be determined right now; Untested = not tried yet.">
-              <SimpleSelect
-                id="f-test"
-                className="w-full"
-                value={draft.test_status}
-                onChange={(v) => set("test_status", v as TestStatus)}
-                options={TEST_STATUSES.map((s) => ({ value: s, label: s }))}
-              />
-            </Field>
-            <Field label="Test notes" htmlFor="f-tnotes" className="sm:col-span-2" hint="What was tested, or why testing is blocked (e.g. “Requires Socket 8 motherboard”).">
-              <Textarea id="f-tnotes" rows={2} value={draft.test_notes} onChange={(e) => set("test_notes", e.target.value)} />
-            </Field>
-          </section>
-
-          <section className="grid gap-4 sm:grid-cols-2">
-            <h2 className="text-sm font-medium text-muted-foreground sm:col-span-2">Where &amp; when</h2>
-            <Field label="Location" htmlFor="f-loc">
-              <LocationPicker
-                id="f-loc"
-                value={draft.location}
-                // A position belongs to its location, so a different location starts without one.
-                onChange={(l) => setDraft({ ...draft, location: l, order: l?.id === draft.location?.id ? draft.order : "" })}
-              />
-            </Field>
-            <Field label="Position" htmlFor="f-order" hint="The exact spot inside the location. Two items cannot share one.">
-              <Input
-                id="f-order"
-                type="number"
-                min={0}
-                disabled={!draft.location}
-                placeholder={nextFree.data !== undefined ? `next free: ${nextFree.data}` : "none"}
-                value={draft.order}
-                onChange={(e) => set("order", e.target.value)}
-              />
-            </Field>
-            <Field label="Acquired on" htmlFor="f-acq">
-              <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />
-            </Field>
-            <Field label="Notes" htmlFor="f-notes" className="sm:col-span-2">
-              <Textarea id="f-notes" rows={4} value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
-            </Field>
-          </section>
-
-          <section className="grid gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground">Specifications</h2>
-              <Button type="button" variant="outline" size="sm" onClick={() => set("attributes", [...draft.attributes, { key: "", value: "" }])}>
-                <Plus /> Add spec
-              </Button>
-            </div>
-            {draft.attributes.length === 0 && (
-              <p className="text-sm text-muted-foreground">Your own category-specific values, e.g. Socket, Clock speed, VRAM, Bus.</p>
-            )}
-            {draft.attributes.map((row, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1.5fr_auto] gap-2">
-                <Input aria-label="Spec name" placeholder="Name" value={row.key} onChange={(e) => setAttr(i, { key: e.target.value })} />
-                <Input aria-label="Spec value" placeholder="Value" value={row.value} onChange={(e) => setAttr(i, { value: e.target.value })} />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Remove spec"
-                  onClick={() => set("attributes", draft.attributes.filter((_, idx) => idx !== i))}
-                >
-                  <Trash2 />
-                </Button>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="grid min-w-0 content-start gap-6">
+          <form
+            className="grid gap-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (dirty) save.mutate();
+            }}
+          >
+            <Section title="Overview">
+              <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                <Field label="Category" htmlFor="f-category">
+                  <SimpleSelect
+                    id="f-category"
+                    className="w-full"
+                    value={draft.category_id}
+                    onChange={(v) => v && set("category_id", v)}
+                    options={(categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
+                  />
+                </Field>
+                <Field label="Manufacturer" htmlFor="f-manufacturer">
+                  <Input id="f-manufacturer" value={draft.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
+                </Field>
+                <Field label="Model / description" htmlFor="f-model" className="sm:col-span-2">
+                  <Input id="f-model" value={draft.model} onChange={(e) => set("model", e.target.value)} />
+                </Field>
+                <Field label="Part number" htmlFor="f-pn">
+                  <Input id="f-pn" placeholder="order / part number" value={draft.part_number} onChange={(e) => set("part_number", e.target.value)} />
+                </Field>
+                <Field label="How sure are you of the exact model?" htmlFor="f-conf">
+                  <SimpleSelect
+                    id="f-conf"
+                    className="w-full"
+                    value={draft.identification_confidence}
+                    onChange={(v) => set("identification_confidence", v as Confidence)}
+                    options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
+                  />
+                </Field>
+                <Field label="Notes" htmlFor="f-notes" className="sm:col-span-2">
+                  <Textarea id="f-notes" rows={3} value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
+                </Field>
               </div>
-            ))}
-          </section>
-          <button type="submit" className="sr-only" tabIndex={-1}>
-            Save
-          </button>
-        </form>
-        <ReferencePanel item={item} locked={dirty} />
+            </Section>
+
+            <Section
+              title={`${category?.name ?? "Item"} specifications`}
+              description={profile.length ? undefined : "No fields are set up for this category yet. Add them under Categories, or add specs below."}
+            >
+              {(profile.length > 0 || extraColumns.length > 0) && (
+                <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {profile.map((f) => {
+                    const inputId = `spec-${f.name.replace(/\W+/g, "-").toLowerCase()}`;
+                    return (
+                      <Field key={f.name} label={f.name} htmlFor={inputId}>
+                        {f.column ? (
+                          <Input
+                            id={inputId}
+                            placeholder={f.hint}
+                            value={columnValue(f.column)}
+                            onChange={(e) => set(f.column!, e.target.value)}
+                          />
+                        ) : (
+                          <Input
+                            id={inputId}
+                            placeholder={f.hint}
+                            list="spec-value-suggestions"
+                            value={specValue(f.name)}
+                            onFocus={() => setFocusedSpec(f.name)}
+                            onChange={(e) => setSpec(f.name, e.target.value)}
+                          />
+                        )}
+                      </Field>
+                    );
+                  })}
+                  {extraColumns.map((c) => (
+                    <Field key={c} label={columnLabels[c]} htmlFor={`spec-col-${c}`}>
+                      <Input id={`spec-col-${c}`} value={columnValue(c)} onChange={(e) => set(c, e.target.value)} />
+                    </Field>
+                  ))}
+                </div>
+              )}
+              <datalist id="spec-value-suggestions">
+                {(suggestions.data ?? []).map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
+
+              {extras.length > 0 && (
+                <div className="mt-6 border-t pt-5">
+                  <h3 className="mb-3 text-sm font-medium">Other specs</h3>
+                  <div className="grid gap-2.5">
+                    {extras.map(({ row, index }) => (
+                      <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-2">
+                        <Input
+                          aria-label="Spec name"
+                          placeholder="Name"
+                          list="attribute-key-suggestions"
+                          value={row.key}
+                          onChange={(e) => set("specs", draft.specs.map((r, i) => (i === index ? { ...r, key: e.target.value } : r)))}
+                        />
+                        <Input
+                          aria-label="Spec value"
+                          placeholder="Value"
+                          value={row.value}
+                          onChange={(e) => set("specs", draft.specs.map((r, i) => (i === index ? { ...r, value: e.target.value } : r)))}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Remove spec"
+                          onClick={() => set("specs", draft.specs.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <datalist id="attribute-key-suggestions">
+                {(attributeKeys.data ?? [])
+                  .filter((k) => !profileNames.has(k.toLowerCase()))
+                  .map((k) => (
+                    <option key={k} value={k} />
+                  ))}
+              </datalist>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => set("specs", [...draft.specs, { key: "", value: "" }])}>
+                  <Plus /> Add another spec
+                </Button>
+                {(sourceName || sourceLink) && (
+                  <p className="text-sm text-muted-foreground">
+                    Source: {sourceName ?? "dataset"}
+                    {sourceLink && /^https?:\/\//.test(sourceLink) && (
+                      <>
+                        {" "}
+                        <a className="inline-flex items-center gap-1 underline" href={sourceLink} target="_blank" rel="noopener noreferrer">
+                          details <ExternalLink className="size-3" />
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+            </Section>
+
+            <Section title="Condition &amp; testing" description="Condition is how it looks. Test status is whether it works.">
+              <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                <Field label="Physical condition" htmlFor="f-cond">
+                  <SimpleSelect
+                    id="f-cond"
+                    className="w-full"
+                    value={draft.condition}
+                    onChange={(v) => set("condition", v as Condition)}
+                    options={CONDITIONS.map((c) => ({ value: c, label: c }))}
+                  />
+                </Field>
+                <Field label="Test status" htmlFor="f-test">
+                  <SimpleSelect
+                    id="f-test"
+                    className="w-full"
+                    value={draft.test_status}
+                    onChange={(v) => set("test_status", v as TestStatus)}
+                    options={TEST_STATUSES.map((s) => ({ value: s, label: s }))}
+                  />
+                </Field>
+                <Field
+                  label="Test notes"
+                  htmlFor="f-tnotes"
+                  className="sm:col-span-2"
+                  hint="What was tested, or why testing is blocked. “Unknown” means it cannot be tested right now; “Untested” means not tried yet."
+                >
+                  <Textarea id="f-tnotes" rows={2} value={draft.test_notes} onChange={(e) => set("test_notes", e.target.value)} />
+                </Field>
+              </div>
+            </Section>
+
+            <Section title="Where it is">
+              <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                <Field label="Location" htmlFor="f-loc">
+                  <LocationPicker
+                    id="f-loc"
+                    value={draft.location}
+                    // A position belongs to its location, so a different location starts without one.
+                    onChange={(l) => setDraft({ ...draft, location: l, order: l?.id === draft.location?.id ? draft.order : "" })}
+                  />
+                </Field>
+                <Field label="Position" htmlFor="f-order" hint={draft.location ? "The exact spot inside the location. Two items cannot share one." : undefined}>
+                  <Input
+                    id="f-order"
+                    type="number"
+                    min={0}
+                    disabled={!draft.location}
+                    placeholder={nextFree.data !== undefined ? `next free: ${nextFree.data}` : "none"}
+                    value={draft.order}
+                    onChange={(e) => set("order", e.target.value)}
+                  />
+                </Field>
+                <Field label="Acquired on" htmlFor="f-acq">
+                  <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />
+                </Field>
+                <Field label="Last verified" htmlFor="f-ver" hint="When you last saw it in place.">
+                  <div className="flex gap-2">
+                    <Input id="f-ver" type="date" value={draft.verified_on} onChange={(e) => set("verified_on", e.target.value)} />
+                    <Button type="button" variant="outline" onClick={() => set("verified_on", new Date().toLocaleDateString("en-CA"))}>
+                      Today
+                    </Button>
+                  </div>
+                </Field>
+              </div>
+            </Section>
+            <button type="submit" className="sr-only" tabIndex={-1}>
+              Save
+            </button>
+          </form>
+
+          <TestHistory item={item} locked={dirty} />
+          <ReferencePanel item={item} locked={dirty} />
         </div>
 
-        <aside>
-          <PhotoManager item={item} />
-          <p className="mt-6 text-xs text-muted-foreground">
-            Added {new Date(item.created_at).toLocaleString()} · updated {new Date(item.updated_at).toLocaleString()}
+        <aside className="grid content-start gap-6 lg:sticky lg:top-20">
+          <Section title="Photos">
+            <PhotoManager item={item} />
+          </Section>
+          <p className="px-1 text-sm text-muted-foreground">
+            Added {new Date(item.created_at).toLocaleString()}
+            <br />
+            Updated {new Date(item.updated_at).toLocaleString()}
           </p>
         </aside>
       </div>

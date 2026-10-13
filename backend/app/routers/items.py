@@ -1,13 +1,15 @@
+import dataclasses
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.enums import Condition, IdentificationConfidence, TestStatus
-from app.models import Category, Item, Location, Photo, ReferenceModel
+from app.models import Category, Item, Location, Photo, ReferenceModel, TestLog
 from app.pagination import apply_keyset, encode_cursor, decode_cursor
 from app.schemas import (
     ItemBatchCreated,
@@ -21,8 +23,8 @@ from app.schemas import (
     PhotoOut,
 )
 from app.services import items as item_service
-from app.services import locations as location_service
 from app.services import reference as reference_service
+from app.services.testlog import log_test
 from app.services.items import ItemFilters
 from app.services.photos import process_pending_deletions, queue_deletions
 from app.storage import StorageError, get_storage
@@ -76,11 +78,18 @@ SUMMARY_COLUMNS = (
     Item.created_at,
     Item.updated_at,
     Item.sort_name,
+    # A few specs of the matched reference model, for the one-line summary.
+    func.coalesce(Item.attributes["Speed"].astext, ReferenceModel.specs["Frequency(internal max/typ)"].astext).label("ref_freq"),
+    func.coalesce(Item.attributes["Bus speed"].astext, ReferenceModel.specs["Bus speed"].astext).label("ref_bus"),
+    func.coalesce(Item.attributes["L2 cache"].astext, ReferenceModel.specs["L2 cache"].astext).label("ref_l2"),
+    func.coalesce(Item.attributes["Package"].astext, ReferenceModel.specs["Package"].astext).label("ref_package"),
+    func.coalesce(Item.attributes["S-Spec"].astext, ReferenceModel.specs["S-Spec"].astext).label("ref_sspec"),
 )
 DETAIL_COLUMNS = SUMMARY_COLUMNS + (
     Item.test_notes,
     Item.notes,
     Item.acquired_on,
+    Item.verified_on,
     Item.reference_model_id,
     Item.attributes,
 )
@@ -96,6 +105,8 @@ def _filters(
     location_id: int | None = None,
     include_descendants: bool = True,
     unassigned: bool = False,
+    never_verified: bool = False,
+    verified_before: date | None = None,
 ) -> ItemFilters:
     return ItemFilters(
         q=q.strip() if q else None,
@@ -107,6 +118,8 @@ def _filters(
         location_id=location_id,
         include_descendants=include_descendants,
         unassigned=unassigned,
+        never_verified=never_verified,
+        verified_before=verified_before,
     )
 
 
@@ -127,36 +140,57 @@ def _thumbnails(session: Session, item_ids: list[int]) -> dict[int, int]:
     return {item_id: photo_id for item_id, photo_id in rows}
 
 
+def _spec_line(row) -> str | None:
+    # Built from the item's own specs (copied from a match or typed in), so the
+    # line is the item's information; an older match without copied specs still shows.
+    return reference_service.spec_line_of(row.ref_freq, row.ref_bus, row.ref_l2, row.ref_package, row.ref_sspec) or None
+
+
 def _summary(row, thumbs: dict[int, int]) -> ItemSummary:
     photo_id = thumbs.get(row.id)
     return ItemSummary(
-        **{name: getattr(row, name) for name in ItemSummary.model_fields if name not in ("thumbnail_url",)},
+        **{name: getattr(row, name) for name in ItemSummary.model_fields if name not in ("thumbnail_url", "spec_line")},
         thumbnail_url=thumbnail_url(photo_id) if photo_id else None,
+        spec_line=_spec_line(row),
     )
 
 
+def _with_reference(stmt):
+    """Join the matched reference model (one row per item at most)."""
+    return stmt.outerjoin(ReferenceModel, ReferenceModel.id == Item.reference_model_id)
+
+
 def load_detail(session: Session, item_id: int) -> ItemDetail:
-    row = session.execute(item_service.base_select(*DETAIL_COLUMNS).where(Item.id == item_id)).first()
+    row = session.execute(_with_reference(item_service.base_select(*DETAIL_COLUMNS)).where(Item.id == item_id)).first()
     if row is None:
         raise HTTPException(404, "item not found")
     photos = session.scalars(
         select(Photo).where(Photo.item_id == item_id).order_by(Photo.sort_order, Photo.id)
     ).all()
     fields = {
-        name: getattr(row, name) for name in ItemDetail.model_fields if name not in ("thumbnail_url", "photos", "reference")
+        name: getattr(row, name)
+        for name in ItemDetail.model_fields
+        if name not in ("thumbnail_url", "photos", "reference", "last_tested_on", "spec_line")
     }
     reference = session.get(ReferenceModel, row.reference_model_id) if row.reference_model_id else None
+    last_tested = session.scalar(select(func.max(TestLog.tested_on)).where(TestLog.item_id == item_id))
     return ItemDetail(
         **fields,
+        last_tested_on=last_tested,
+        spec_line=_spec_line(row),
         reference=reference_service.detail_of(session, reference) if reference else None,
         thumbnail_url=thumbnail_url(photos[0].id) if photos else None,
         photos=[photo_out(p) for p in photos],
     )
 
 
-def _check_refs(session: Session, category_id: int | None, location_id: int | None) -> None:
+def _check_refs(
+    session: Session, category_id: int | None, location_id: int | None, reference_model_id: int | None = None
+) -> None:
     if category_id is not None and session.get(Category, category_id) is None:
         raise HTTPException(422, "category does not exist")
+    if reference_model_id is not None and session.get(ReferenceModel, reference_model_id) is None:
+        raise HTTPException(422, "reference model does not exist")
     if location_id is not None and session.get(Location, location_id) is None:
         raise HTTPException(422, "location does not exist")
 
@@ -191,7 +225,7 @@ def list_items(
         if isinstance(key, int) != (sort == "newest"):
             raise HTTPException(422, "cursor does not match the requested sort")
 
-    stmt = item_service.apply_filters(session, item_service.base_select(*SUMMARY_COLUMNS), filters)
+    stmt = item_service.apply_filters(session, _with_reference(item_service.base_select(*SUMMARY_COLUMNS)), filters)
     stmt = apply_keyset(stmt, key_expr, Item.id, cursor=cursor, descending=descending, limit=limit)
     rows = session.execute(stmt).all()
 
@@ -209,6 +243,16 @@ def list_items(
     return Page[ItemSummary](items=[_summary(r, thumbs) for r in rows], next_cursor=next_cursor, total=total)
 
 
+@router.get("/facets", response_model=dict[str, int])
+def test_status_facets(session: SessionDep, filters: FiltersDep):
+    """How many of the items matching the other filters have each test status.
+    The test-status filter itself is ignored so every option shows its count."""
+    others = dataclasses.replace(filters, test_statuses=[])
+    stmt = item_service.apply_filters(session, select(Item.test_status, func.count(Item.id)).group_by(Item.test_status), others)
+    counts = dict(session.execute(stmt).all())
+    return {status.value: counts.get(status.value, 0) for status in TestStatus}
+
+
 @router.get("/by-code/{inventory_code}", response_model=ItemDetail)
 def get_item_by_code(inventory_code: str, session: SessionDep):
     item_id = session.scalar(select(Item.id).where(Item.inventory_code == inventory_code.upper()))
@@ -219,10 +263,18 @@ def get_item_by_code(inventory_code: str, session: SessionDep):
 
 @router.post("", response_model=ItemDetail, status_code=201)
 def create_item(body: ItemCreate, session: SessionDep):
-    _check_refs(session, body.category_id, body.location_id)
+    _check_refs(session, body.category_id, body.location_id, body.reference_model_id)
     item_service.ensure_position_free(session, body.location_id, body.order)
-    item = Item(**body.model_dump(mode="json", exclude={"acquired_on"}), acquired_on=body.acquired_on)
+    fields = body.model_dump(mode="json", exclude={"acquired_on"})
+    if body.reference_model_id is not None:
+        # The match's specs become the item's own (what the user typed wins).
+        ref = session.get(ReferenceModel, body.reference_model_id)
+        fields["attributes"] = reference_service.merge_specs(fields["attributes"], reference_service.spec_snapshot(ref))
+    item = Item(**fields, acquired_on=body.acquired_on)
     session.add(item)
+    session.flush()
+    if item.test_status != TestStatus.UNTESTED.value:
+        log_test(session, item, item.test_status, item.test_notes)
     _commit_or_position_conflict(session)
     return load_detail(session, item.id)
 
@@ -234,6 +286,8 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
     template = body.item
     if session.get(Category, template.category_id) is None:
         raise HTTPException(422, "category does not exist")
+    if template.reference_model_id is not None and session.get(ReferenceModel, template.reference_model_id) is None:
+        raise HTTPException(422, "reference model does not exist")
     if body.order_start is not None and template.location_id is None:
         raise HTTPException(422, "positions need a location; choose one or omit order_start")
     if template.order is not None:
@@ -261,12 +315,19 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
             )
 
     fields = template.model_dump(mode="json", exclude={"acquired_on", "order"})
+    if template.reference_model_id is not None:
+        ref = session.get(ReferenceModel, template.reference_model_id)
+        fields["attributes"] = reference_service.merge_specs(fields["attributes"], reference_service.spec_snapshot(ref))
     created: list[Item] = []
     for index in range(body.copies):
         order = body.order_start + index if body.order_start is not None else None
         item = Item(**fields, acquired_on=template.acquired_on, order=order)
         session.add(item)
         created.append(item)
+    session.flush()
+    for item in created:
+        if item.test_status != TestStatus.UNTESTED.value:
+            log_test(session, item, item.test_status, item.test_notes)
     _commit_or_position_conflict(session)
     return ItemBatchOut(
         created=[
@@ -298,8 +359,11 @@ def update_item(item_id: int, body: ItemUpdate, session: SessionDep):
         raise HTTPException(422, "a position only makes sense inside a location; choose a location first")
     if "order" in changes or "location_id" in changes:
         item_service.ensure_position_free(session, new_location, new_order, item_id)
+    previous_status = item.test_status
     for name, value in changes.items():
         setattr(item, name, value.value if hasattr(value, "value") else value)
+    if item.test_status != previous_status:
+        log_test(session, item, item.test_status, item.test_notes)
     _commit_or_position_conflict(session)
     return load_detail(session, item_id)
 

@@ -1,18 +1,30 @@
 "use client";
 
-import { Cpu, Moon, Plus, Sun } from "lucide-react";
+import { Cpu, Keyboard, Moon, Plus, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuickAdd } from "@/components/quick-add";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Inventory" },
   { href: "/locations", label: "Locations" },
   { href: "/categories", label: "Categories" },
+  { href: "/import", label: "Import" },
+];
+
+const SHORTCUTS: { keys: string; what: string }[] = [
+  { keys: "/", what: "Jump to search" },
+  { keys: "n", what: "Quick add" },
+  { keys: "?", what: "Show this list" },
+  { keys: "Ctrl/⌘ + S", what: "Save the item you are editing" },
+  { keys: "Shift + click", what: "Select a range of items in a list" },
+  { keys: "Enter in Quick add", what: "Save and add another" },
+  { keys: "Esc", what: "Close a dialog or menu" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -20,6 +32,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { open } = useQuickAdd();
   const { resolvedTheme, setTheme } = useTheme();
+  const [help, setHelp] = useState(false);
+
+  // "?" shows the shortcut list.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
+      if (document.querySelector("[role=dialog], [role=alertdialog]")) return;
+      e.preventDefault();
+      setHelp(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // "/" jumps to search from anywhere.
   useEffect(() => {
@@ -38,12 +65,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur print:hidden">
         <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-2 px-4 sm:gap-4">
           <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
             <Cpu className="size-5" /> <span className="hidden sm:inline">Hoardware</span>
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm sm:gap-1">
             {NAV.map((n) => {
               const active = n.href === "/" ? pathname === "/" || pathname.startsWith("/items") : pathname.startsWith(n.href);
               return (
@@ -51,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={n.href}
                   href={n.href}
                   className={cn(
-                    "rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground",
+                    "shrink-0 rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground sm:px-2.5",
                     active && "bg-muted text-foreground",
                   )}
                 >
@@ -60,10 +87,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <Button onClick={() => open()}>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <Button aria-label="Quick add" onClick={() => open()}>
               <Plus /> <span className="hidden sm:inline">Quick add</span>
               <kbd className="ml-1 hidden rounded bg-primary-foreground/20 px-1 font-mono text-[10px] sm:inline">N</kbd>
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" className="hidden sm:inline-flex" onClick={() => setHelp(true)}>
+              <Keyboard />
             </Button>
             <Button
               variant="ghost"
@@ -77,7 +107,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+      <Dialog open={help} onOpenChange={setHelp}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogDescription>Shortcuts that type a letter work when you are not in a text field.</DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {SHORTCUTS.map((sc) => (
+              <div key={sc.keys} className="contents">
+                <dt>
+                  <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">{sc.keys}</kbd>
+                </dt>
+                <dd className="text-muted-foreground">{sc.what}</dd>
+              </div>
+            ))}
+          </dl>
+        </DialogContent>
+      </Dialog>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 print:max-w-none print:p-0">{children}</main>
     </div>
   );
 }

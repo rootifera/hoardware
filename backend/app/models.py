@@ -36,6 +36,11 @@ class Category(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     name: Mapped[str] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
+    # The fields items of this category are described with, in order:
+    # [{"name": "Speed", "hint": "e.g. 200MHz", "column": null}, ...]. A field with
+    # a "column" (chipset_manufacturer / chipset / revision) is stored in that
+    # item column; every other field is a named entry in the item's own specs.
+    fields: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -89,6 +94,8 @@ class Item(Base):
     order: Mapped[int | None] = mapped_column("order", Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     acquired_on: Mapped[date | None] = mapped_column(Date)
+    # Stock-take: when the item was last seen in place.
+    verified_on: Mapped[date | None] = mapped_column(Date)
     reference_model_id: Mapped[int | None] = mapped_column(ForeignKey("reference_models.id", ondelete="SET NULL"))
     identification_confidence: Mapped[str] = mapped_column(
         Text, server_default=IdentificationConfidence.UNIDENTIFIED.value
@@ -104,7 +111,8 @@ class Item(Base):
             "lower(inventory_code || ' ' || coalesce(manufacturer, '') || ' ' || model"
             " || ' ' || coalesce(part_number, '') || ' ' || coalesce(revision, '')"
             " || ' ' || coalesce(chipset_manufacturer, '') || ' ' || coalesce(chipset, '')"
-            " || ' ' || coalesce(notes, ''))",
+            " || ' ' || coalesce(notes, '') || ' ' || coalesce(test_notes, '')"
+            " || ' ' || coalesce(attributes::text, ''))",
             persisted=True,
         ),
     )
@@ -214,3 +222,19 @@ class ReferenceModel(Base):
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     search_text: Mapped[str] = mapped_column(Text)
     sort_name: Mapped[str] = mapped_column(Text)
+
+
+class TestLog(Base):
+    """One entry in an item's test history: a status and when it was recorded.
+    Written automatically when an item's test status changes, or by hand."""
+
+    __test__ = False  # not a pytest class
+    __tablename__ = "test_log"
+    __table_args__ = (CheckConstraint(f"status IN ({sql_in(TestStatus)})", name="ck_test_log_status"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"))
+    tested_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    status: Mapped[str] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

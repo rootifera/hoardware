@@ -110,3 +110,22 @@ def test_health(client):
     r = client.get(f"{API}/health")
     assert r.status_code == 200
     assert r.json()["database"] == "ok" and r.json()["storage"]["status"] == "ok"
+
+
+def test_attribute_key_suggestions(client, make_item, cats):
+    make_item("a", category="CPU", attributes={"Socket": "7", "Clock": "200"})
+    make_item("b", category="CPU", attributes={"Socket": "8"})
+    make_item("c", category="GPU/VGA", attributes={"VRAM": "4MB", "Socket": "n/a"})
+    make_item("d")  # no attributes
+    assert client.get(f"{API}/attribute-keys").json() == ["Socket", "Clock", "VRAM"]
+    assert client.get(f"{API}/attribute-keys", params={"category_id": cats["CPU"]}).json() == ["Socket", "Clock"]
+    assert client.get(f"{API}/attribute-keys", params={"category_id": cats["RAM"]}).json() == []
+    assert client.get(f"{API}/attribute-keys", params={"limit": 1}).json() == ["Socket"]
+
+
+def test_database_session_uses_the_configured_timezone(db):
+    from sqlalchemy import text
+
+    from app.config import get_settings
+
+    assert db.scalar(text("SHOW timezone")) == get_settings().tz

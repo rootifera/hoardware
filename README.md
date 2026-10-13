@@ -34,12 +34,17 @@ Everyday use needs no internet access. (Building the images does.)
 ## Using it
 
 - **Inventory**: instant search across code, manufacturer, model, part number, chipset and notes; filter by category, manufacturer, condition, test status, identification and location (with or without sub-locations); sort by latest, name, category or location. Filters live in the URL, so a search can be bookmarked.
-- **Quick add**: only a category and a description are required. Category and location are remembered between additions.
+- **Category-specific item pages**: each category defines its own fields, so a CPU is described as a CPU (Family, Speed, Bus speed, L2 cache, Socket, Package, Stepping…) and a graphics card as a graphics card (Chipset maker, Chipset, Memory size, Bus…); chipset fields only appear where they make sense. The item page is a stack of clear sections: Overview, *Specifications* for its category, Condition & testing, Where it is, test history, with photos beside them and the secondary actions (add another like this, delete) in the **⋯** menu. Change a category's fields on the **Categories** page (*Fields*): add, rename, reorder, remove. The seven default categories start with sensible fields. Values you enter are the item's own specs (searchable, shown on the inventory row, in the CSV `specs` column); anything not covered by the category's fields appears under *Other specs*.
+- **Quick add**: only a category and a description are required. Category and location are remembered between additions, and as you type it tells you if you already have matching items.
+- **Status strip**: above the list, chips show how many items are Untested, Unknown, POST, Full Test or Dead (respecting your other filters); click one to filter.
+- **Test history**: every change of an item's test status is logged automatically with the date and the notes in force at the time, and you can log a test by hand (result, date, what was tested). The item page shows the history and when it was last tested. Items created by CSV import start with no history.
 - **Test status vs condition**: independent. `Unknown` means testing is currently impossible (note why in *Test notes*); `Untested` means not tried yet.
 - **Every physical item is its own record** with its own code (`HW-000001`, never reused), so identical parts can differ in location, condition and test result.
 - **Locations**: a tree (`Workshop > Shelf 2 > CPU Box 3`); moving or renaming a location updates everything inside it.
 - **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Copies** = 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
-- **CSV export**: the **CSV** button exports the current filter (streamed, so it works at any size).
+- **Stock-take**: each item records when it was last *verified* (seen in place). Tick what is physically there and press **Verified** in the bulk bar, then use the *Last verified* filter (or the *Stock-take* filter on a location's page) to list what has not been seen in 30/90/365 days, or never. **Print list** on a location's page gives a printable, position-ordered sheet with a tick box per item, grouped by sub-location, for checking on paper.
+- **Bulk actions**: tick rows (shift-click selects a range, or *Select all N matching* for everything the filters match) and a bar appears: set the test status, condition, category or test notes, or **Move…** to a location. When moving you choose what happens to positions: clear them, number on after the last one in the destination, or keep them (refused if any would clash, with a count shown before you commit). On a location's page, **Move all items…** moves everything out of it.
+- **CSV export and import**: the **CSV** button exports the current filter (streamed, so it works at any size). **Import** takes a CSV (the export's columns, a template is provided, and friendly header names such as `name`, `p/n` work too), checks every row first and shows the problems by line, and writes nothing until you confirm. It is all-or-nothing unless you tick *Skip rows with errors*; *Create missing categories/locations* fill in what the file refers to. Every row becomes a new item with a new code.
 
 ## Photo storage
 
@@ -122,7 +127,7 @@ Volume names are prefixed with the Compose project name (`hoardware_` by default
 
 Hoardware works fully without this. If you want, an item can be matched to a described model (specs from a public dataset) so you don't have to type them in. Matching never changes your own fields, never links automatically, and can be undone with **Unlink**.
 
-CPU-DB (<https://github.com/zymos/cpu-db>) is supported. Put a checkout (or just the `cpu-db.<Vendor>.csv` files) in `./reference-data/cpu-db/` (git-ignored; mounted read-only into the backend at `/reference-data`), then:
+CPU-DB (<https://github.com/zymos/cpu-db>) is supported. Put a checkout (or just the `cpu-db.<Vendor>.csv` files) in `./reference-data/cpu-db/` (git-ignored; mounted read-only into the backend at `/reference-data`). If you also include `supplemental_db/cpu-db.supplemetal.Intel.S-Spec_numbers.csv`, Intel records gain the bus speed and any missing speed/cache/package, and about 1,200 more S-Specs become findable. Then:
 
 ```bash
 docker compose run --rm --no-deps backend python -m app.cli import-reference cpu-db /reference-data/cpu-db --dry-run   # report only
@@ -131,7 +136,9 @@ docker compose run --rm --no-deps backend python -m app.cli import-reference cpu
 
 The import is repeatable: re-running reports `added / changed / unchanged / skipped / errors`, updates records in place (so existing links survive) and never deletes records. Findings about the dataset's quirks, and why the GPU datasets are not imported, are in [docs/reference-data-findings.md](docs/reference-data-findings.md).
 
-On an item page, **Find reference match** suggests models by part number (including codes such as an S-Spec) and name; you choose **Confirm match** or **Mark as candidate**.
+**While adding a CPU:** open Quick add and type the code printed on the chip (an S-Spec such as `SL32A`, or an ordering code) into *Part number* or *Model*, or a name in a CPU category. A dropdown floats under the field with matching records, each showing a readable name, the full part number and the key specs (speed, bus, cache, package); nothing is filled in until you click one, and the dialog never changes size. Picking it fills the manufacturer, the **part number as the order code only** (e.g. `BX80524R300128`; the **S-Spec**, the short code printed on the chip such as `SL32A`, is saved as its own spec), the CPU category (even if another was selected) and a proper model name built from the record (e.g. "Celeron 300MHz 128KiB L2"), replacing a model field that only held the code you typed (but never a name you wrote yourself). The match is saved with the item as confirmed and **its specs are copied onto the item itself** (Speed, Bus speed, L2 cache, Package, Family, source link…, listed under *Specifications*): they belong to the item, are editable, show up as a one-line summary under the name in the inventory, are searchable (try `sepp` or `66mhz`) and travel in the CSV export/import (`specs` column). What you typed always wins, and unlinking keeps the specs. The link only remembers where they came from; the original dataset record is under a collapsed *The original record in the dataset* on the item page. Edit any field you like, or press ✕ on the green line to drop the match. The dataset names chips only by family and speed, so the cache is added to tell a plain "Celeron 300" (no cache) from a "300A" (128 KiB); marketing names are not invented.
+
+**For existing items:** on an item page, **Find reference match** suggests models by part number (including codes such as an S-Spec) and name; you choose **Confirm match** or **Mark as candidate**, and once matched, **Use this name** renames an item that was added as just a code and **Fill in missing specs** copies any specs the item does not have yet (never overwriting yours).
 
 ## Development
 
@@ -149,7 +156,7 @@ docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
   -e BASE_URL=http://frontend:3000 mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test
 ```
 
-The scale tests in `backend/tests/test_scale.py` seed 100,000 items and check query plans and latency.
+The scale tests in `backend/tests/test_scale.py` seed 100,000 items and check query plans and latency. The browser tests include an automated accessibility audit (axe-core, WCAG A/AA) of every screen. `.github/workflows/ci.yml` runs all of this on GitHub.
 
 ### Layout
 
@@ -161,4 +168,4 @@ e2e/        Playwright smoke tests
 
 ## API
 
-Interactive docs: `/api/v1/docs` (through the frontend). Lists use cursor (keyset) pagination: pass the returned `next_cursor` back as `cursor`. Search and filtering run in SQL (PostgreSQL `pg_trgm` indexes).
+Interactive docs: `/api/v1/docs` (through the frontend; the viewer page loads its scripts from a CDN, so it needs internet, while `/api/v1/openapi.json` always works offline). Lists use cursor (keyset) pagination: pass the returned `next_cursor` back as `cursor`. Search and filtering run in SQL (PostgreSQL `pg_trgm` indexes).

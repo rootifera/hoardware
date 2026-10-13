@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
+    # IANA timezone used for "today" (verified/tested dates). Set TZ in .env.
+    tz: str = "UTC"
+
     database_url: str = "postgresql+psycopg://hoardware:hoardware@db:5432/hoardware"
 
     # Photos

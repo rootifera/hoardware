@@ -7,6 +7,7 @@
 # internal network, through the Next.js proxy at /api/*.
 
 x-backend-env: &backend-env
+  TZ: ${TZ:-UTC}
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-hoardware}:${POSTGRES_PASSWORD:-hoardware}@db:5432/${POSTGRES_DB:-hoardware}
   STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}

@@ -12,7 +12,10 @@ Written against the real data, see docs/reference-data-findings.md:
   and omitted, "none" is a real value (e.g. no L2 cache) and kept;
 * there is no stable ID and (manufacturer, family, part #) is not unique, so
   exact duplicates are collapsed and different rows with the same key become
-  numbered variants.
+  numbered variants;
+* if ``supplemental_db/cpu-db.supplemetal.Intel.S-Spec_numbers.csv`` is present
+  it enriches matching records (bus speed, and any speed / cache / package the
+  main row lacks) and adds records for S-Specs the main files do not list.
 """
 
 import csv
@@ -21,7 +24,7 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from app.reference.base import ParseIssue, ReferenceAdapter, ReferenceRecord, SourceInfo
+from app.reference.base import ParseIssue, ReferenceAdapter, ReferenceRecord, SourceInfo, build_keys, match_key
 
 PLACEHOLDERS_NA = {"na", "n/a"}
 REQUIRED = ("Manufacturer", "Family", "Part #")
@@ -53,6 +56,63 @@ def vendor_files(path: Path) -> list[Path]:
     )
 
 
+SSPEC_FILE = Path("supplemental_db") / "cpu-db.supplemetal.Intel.S-Spec_numbers.csv"
+# S-Spec table column -> spec name used by the main files
+_SSPEC_SPECS = {
+    "Speed": "Frequency(internal max/typ)",
+    "Bus speed": "Bus speed",
+    "L2 cache size": "L2 cache",
+    "Package type": "Package",
+}
+
+
+# Intel's S-Spec (sSpec) is the short code printed on the chip: SL32A, SY060,
+# SU103 ... or a Q-spec such as Q0939. It is the last word of a CPU-DB part
+# number ("BX80524R300128 SL32A"); the rest is the order code.
+_SSPEC = re.compile(r"^(?=.*\d)(S[A-Z][A-Z0-9]{3}|Q[A-Z0-9]{3,4})$", re.IGNORECASE)
+
+
+def split_sspec(part_number: str) -> tuple[str, str | None]:
+    """("BX80524R300128 SL32A") -> ("BX80524R300128", "SL32A"); no S-Spec -> (part, None)."""
+    words = part_number.split()
+    if len(words) >= 2 and _SSPEC.match(words[-1]):
+        return " ".join(words[:-1]), words[-1].upper()
+    return part_number, None
+
+
+def sspec_file(path: Path) -> Path | None:
+    base = path if path.is_dir() else path.parent
+    candidate = base / SSPEC_FILE
+    return candidate if candidate.is_file() else None
+
+
+def read_sspecs(file: Path) -> tuple[dict[str, dict], list[ParseIssue]]:
+    """S-Spec table rows keyed by the normalised S-Spec ('SL32A' -> 'sl32a')."""
+    rows: dict[str, dict] = {}
+    issues: list[ParseIssue] = []
+    with open(file, encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            clean = {k.strip(): (v or "").strip() for k, v in row.items() if k}
+            key = match_key(clean.get("S-Spec number"))
+            if not key:
+                continue
+            if key in rows:
+                issues.append(ParseIssue("skipped", f"duplicate S-Spec {clean['S-Spec number']}", f"{file.name}:{reader.line_num}"))
+                continue
+            clean["_line"] = reader.line_num
+            rows[key] = clean
+    return rows, issues
+
+
+def _sspec_specs(row: dict) -> dict:
+    specs = {name: row[col] for col, name in _SSPEC_SPECS.items() if row.get(col)}
+    refs = [row[c] for c in (f"Reference {i}" for i in range(1, 6)) if row.get(c)]
+    if refs:
+        specs["references"] = refs
+    return specs
+
+
 class CpuDbAdapter(ReferenceAdapter):
     source = SourceInfo(
         key="cpu-db",
@@ -64,7 +124,7 @@ class CpuDbAdapter(ReferenceAdapter):
 
     def source_version(self, path: Path) -> str:
         digest = hashlib.sha1()
-        for file in vendor_files(path):
+        for file in [*vendor_files(path), *([f] if (f := sspec_file(path)) else [])]:
             digest.update(file.name.encode())
             digest.update(file.read_bytes())
         return f"sha1:{digest.hexdigest()[:16]}"
@@ -74,9 +134,58 @@ class CpuDbAdapter(ReferenceAdapter):
         if not files:
             yield ParseIssue("error", f"no cpu-db.<Vendor>.csv files found in {path}")
             return
+        self._sspecs: dict[str, dict] = {}
+        self._used: set[str] = set()
+        table = sspec_file(path)
+        if table:
+            self._sspecs, issues = read_sspecs(table)
+            yield from issues
         seen: dict[tuple[str, str, str], list[str]] = {}
         for file in files:
             yield from self._read_file(file, seen)
+        # S-Specs the main files do not list become records of their own.
+        for key, row in self._sspecs.items():
+            if key in self._used:
+                continue
+            sspec = row["S-Spec number"]
+            order_code = row.get("Part number", "")
+            part = f"{order_code} {sspec}".strip()
+            yield ReferenceRecord(
+                upstream_id=f"sspec|{key}",
+                kind="cpu",
+                model=part,
+                manufacturer=row.get("Manufacturer") or "Intel",
+                family=row.get("Family") or None,
+                part_number=part,
+                aliases=[a for a in (row.get(f"Alternative part number {i}", "") for i in range(1, 7)) if a],
+                specs={"S-Spec": sspec.upper(), **_sspec_specs(row)},
+                provenance={"file": table.name, "line": row["_line"], "from_sspec_table": True},
+            )
+
+    def _enrich_from_sspec_table(self, record: ReferenceRecord) -> None:
+        """Record the S-Spec of an Intel part and add what the S-Spec table
+        knows about it (e.g. bus speed)."""
+        if not (record.manufacturer or "").lower().startswith("intel"):
+            return  # S-Specs and their table only cover Intel parts
+        _, detected = split_sspec(record.part_number or "")
+        if detected:
+            record.specs.setdefault("S-Spec", detected)
+        if not self._sspecs:
+            return
+        exact, tokens = build_keys(record.part_number, record.aliases)
+        key = next((k for k in [*tokens, *exact] if k in self._sspecs), None)
+        if key is None:
+            return
+        self._used.add(key)
+        record.specs["S-Spec"] = self._sspecs[key]["S-Spec number"].upper()
+        extra = _sspec_specs(self._sspecs[key])
+        for name, value in extra.items():
+            if name == "references":
+                merged = list(record.specs.get("references", []))
+                record.specs["references"] = merged + [r for r in value if r not in merged]
+            elif name == "Bus speed" or record.specs.get(name) in (None, ""):
+                record.specs[name] = value
+        record.provenance["sspec_table"] = True
 
     def _read_file(
         self, file: Path, seen: dict[tuple[str, str, str], list[str]]
@@ -152,6 +261,8 @@ class CpuDbAdapter(ReferenceAdapter):
                     specs=specs,
                     provenance={"file": file.name, "line": reader.line_num, **({"manufacturer_inferred_from_filename": True} if inferred else {})},
                 )
+
+                self._enrich_from_sspec_table(record)
 
                 key = (_norm(manufacturer), _norm(family), _norm(part))
                 digest = record.content_hash()

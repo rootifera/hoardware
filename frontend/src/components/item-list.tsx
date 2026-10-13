@@ -4,12 +4,14 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { Cpu, ImageOff, MapPin, PackageOpen, SearchX } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BulkBar, EMPTY_SELECTION, toBulkSelection, type Selection } from "@/components/bulk";
 import { ConditionBadge, ConfidenceBadge, TestStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuickAdd } from "@/components/quick-add";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { EMPTY_FILTERS, type ItemFilters, type ItemSummary } from "@/lib/types";
 
 const ROW_HEIGHT = 76;
@@ -17,7 +19,7 @@ const PAGE_SIZE = 50;
 
 export function hasActiveFilters(f: ItemFilters): boolean {
   return Boolean(
-    f.q.trim() || f.category || f.manufacturer || f.condition || f.test || f.confidence || f.location || f.unassigned,
+    f.q.trim() || f.category || f.manufacturer || f.condition || f.test || f.confidence || f.location || f.unassigned || f.verified,
   );
 }
 
@@ -42,12 +44,23 @@ function Thumb({ item }: { item: ItemSummary }) {
   );
 }
 
-function ItemRow({ item }: { item: ItemSummary }) {
+function ItemRow({ item, selected, onToggle }: { item: ItemSummary; selected: boolean; onToggle: (shift: boolean) => void }) {
   const name = [item.manufacturer, item.model].filter(Boolean).join(" ");
   return (
+    <div className={cn("flex h-full items-center rounded-lg transition-colors", selected ? "bg-primary/5" : "hover:bg-muted/60")}>
+      <label className="flex h-full shrink-0 cursor-pointer items-center px-2.5">
+        <input
+          type="checkbox"
+          className="size-4 accent-primary"
+          aria-label={`Select ${item.inventory_code}`}
+          checked={selected}
+          onChange={() => {}}
+          onClick={(e) => onToggle(e.shiftKey)}
+        />
+      </label>
     <Link
       href={`/items/${item.id}`}
-      className="flex h-full items-center gap-3 rounded-lg px-2 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+      className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg pr-2 focus-visible:bg-muted/60 focus-visible:outline-none"
     >
       <Thumb item={item} />
       <div className="min-w-0 flex-1">
@@ -57,6 +70,7 @@ function ItemRow({ item }: { item: ItemSummary }) {
         </div>
         <div className="truncate font-medium">{name}</div>
         <div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+          {item.spec_line && <span className="truncate font-medium text-foreground/80">{item.spec_line}</span>}
           {item.part_number && <span className="truncate">P/N {item.part_number}</span>}
           {item.chipset && <span className="truncate">{item.chipset}</span>}
           <span className="flex min-w-0 items-center gap-1 truncate sm:hidden">
@@ -71,7 +85,7 @@ function ItemRow({ item }: { item: ItemSummary }) {
         <span className="truncate" title={item.location_path ?? undefined}>
           {item.location_path ?? <span className="italic">No location</span>}
         </span>
-        {item.order !== null && <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-xs">#{item.order}</span>}
+        {item.order !== null && <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-xs text-foreground">#{item.order}</span>}
       </div>
       {/* Fixed width so the location column lines up from row to row. */}
       <div className="flex shrink-0 flex-col items-end gap-1 sm:w-40 sm:flex-row sm:items-center sm:justify-end lg:w-72">
@@ -80,6 +94,7 @@ function ItemRow({ item }: { item: ItemSummary }) {
         <TestStatusBadge status={item.test_status} />
       </div>
     </Link>
+    </div>
   );
 }
 
@@ -97,6 +112,43 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
   });
 
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
+
+  // Selection belongs to the current filters; changing them starts afresh.
+  const filterKey = JSON.stringify(filters);
+  const [selState, setSelState] = useState<{ key: string; sel: Selection }>({ key: filterKey, sel: EMPTY_SELECTION });
+  const sel = selState.key === filterKey ? selState.sel : EMPTY_SELECTION;
+  const setSel = (next: Selection) => setSelState({ key: filterKey, sel: next });
+  const lastClicked = useRef<number | null>(null);
+  const total = count.data ?? 0;
+  const isSelected = (id: number) => (sel.mode === "ids" ? sel.ids.has(id) : !sel.excluded.has(id));
+  const selectedCount = sel.mode === "ids" ? sel.ids.size : Math.max(0, total - sel.excluded.size);
+
+  function setMany(ids: number[], selected: boolean) {
+    if (sel.mode === "ids") {
+      const next = new Set(sel.ids);
+      for (const id of ids) {
+        if (selected) next.add(id);
+        else next.delete(id);
+      }
+      setSel({ mode: "ids", ids: next });
+    } else {
+      const next = new Set(sel.excluded);
+      for (const id of ids) {
+        if (selected) next.delete(id);
+        else next.add(id);
+      }
+      setSel({ mode: "all", excluded: next });
+    }
+  }
+  function toggle(index: number, shift: boolean) {
+    const target = !isSelected(items[index].id);
+    // Shift-click selects (or clears) the whole range since the last click.
+    const from = shift && lastClicked.current !== null ? Math.min(lastClicked.current, index) : index;
+    const to = shift && lastClicked.current !== null ? Math.max(lastClicked.current, index) : index;
+    setMany(items.slice(from, to + 1).map((i) => i.id), target);
+    lastClicked.current = index;
+  }
+  const allLoadedSelected = items.length > 0 && items.every((i) => isSelected(i.id));
   // Distance from the top of the page to the list, so the window virtualizer
   // knows where the rows start.
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -167,10 +219,36 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
   }
 
   return (
-    <div>
-      <p className="mb-2 text-sm text-muted-foreground" aria-live="polite">
-        {count.data != null ? `${count.data.toLocaleString()} item${count.data === 1 ? "" : "s"}` : " "}
-      </p>
+    // Room at the bottom so the floating bulk bar never hides the last rows.
+    <div className={selectedCount > 0 ? "pb-28" : undefined}>
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 text-sm text-muted-foreground">
+        <label className="flex cursor-pointer items-center gap-3">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            aria-label="Select all loaded items"
+            checked={allLoadedSelected}
+            onChange={() => setMany(items.map((i) => i.id), !allLoadedSelected)}
+          />
+          <span aria-live="polite">{count.data != null ? `${count.data.toLocaleString()} item${count.data === 1 ? "" : "s"}` : " "}</span>
+        </label>
+        {sel.mode === "ids" && allLoadedSelected && total > items.length && (
+          <span>
+            {items.length} loaded items selected.{" "}
+            <button type="button" className="font-medium text-foreground underline" onClick={() => setSel({ mode: "all", excluded: new Set() })}>
+              Select all {total.toLocaleString()} matching
+            </button>
+          </span>
+        )}
+        {sel.mode === "all" && (
+          <span>
+            All {selectedCount.toLocaleString()} matching items selected.{" "}
+            <button type="button" className="font-medium text-foreground underline" onClick={() => setSel(EMPTY_SELECTION)}>
+              Clear selection
+            </button>
+          </span>
+        )}
+      </div>
       <div ref={listRef} className="relative" style={{ height: virtualizer.getTotalSize() }}>
         {virtualItems.map((row) => {
           const item = items[row.index];
@@ -180,7 +258,7 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
               className="absolute inset-x-0 top-0 border-b border-border/60"
               style={{ height: row.size, transform: `translateY(${row.start - virtualizer.options.scrollMargin}px)` }}
             >
-              <ItemRow item={item} />
+              <ItemRow item={item} selected={isSelected(item.id)} onToggle={(shift) => toggle(row.index, shift)} />
             </div>
           );
         })}
@@ -188,6 +266,9 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
       <p className="py-4 text-center text-sm text-muted-foreground">
         {isFetchingNextPage ? "Loading more…" : hasNextPage ? "" : `End of list`}
       </p>
+      {selectedCount > 0 && (
+        <BulkBar count={selectedCount} selection={toBulkSelection(sel, filters)} onClear={() => setSel(EMPTY_SELECTION)} />
+      )}
     </div>
   );
 }

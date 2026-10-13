@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests (PostgreSQL 18)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the database
+        run: docker compose up -d --build db
+      - name: Run the tests (including the 100k-item scale tests)
+        run: docker compose run --rm --no-deps backend pytest -q
+
+  frontend:
+    name: Frontend lint, types, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  e2e:
+    name: Browser tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the whole stack
+        run: |
+          docker compose -p hoardware up -d --build
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/v1/health && break
+            sleep 2
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install the Playwright test package
+        working-directory: e2e
+        run: npm ci
+      - name: Run the browser tests (also runs the accessibility audit)
+        working-directory: e2e
+        run: |
+          docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
+            -e BASE_URL=http://frontend:3000 \
+            mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test
+      - name: Show the logs if something failed
+        if: failure()
+        run: docker compose -p hoardware logs --tail=200

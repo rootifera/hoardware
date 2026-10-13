@@ -155,7 +155,7 @@ function Finder({ item, locked, onLink, busy }: { item: ItemDetail; locked: bool
 
 const COLLAPSED_SPECS = 14;
 
-function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChange, busy }: { item: ItemDetail; reference: ReferenceDetail; locked: boolean; onUnlink: () => void; onConfirm: () => void; onChange: () => void; busy: boolean }) {
+function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChange, onUseName, onRefill, busy }: { item: ItemDetail; reference: ReferenceDetail; locked: boolean; onUnlink: () => void; onConfirm: () => void; onChange: () => void; onUseName: () => void; onRefill: () => void; busy: boolean }) {
   const [all, setAll] = useState(false);
   const overrides = new Map(Object.entries(item.attributes).map(([k, v]) => [k.toLowerCase(), v]));
   const entries = Object.entries(reference.specs)
@@ -170,7 +170,12 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <p className="text-lg font-medium">{titleOf(reference)}</p>
+          <p className="text-lg font-medium">{[reference.manufacturer, reference.display_name].filter(Boolean).join(" ")}</p>
+          {reference.spec_line && <p className="text-sm text-muted-foreground">{reference.spec_line}</p>}
+          <p className="font-mono text-xs text-muted-foreground">
+            {reference.order_code ?? reference.part_number ?? reference.model}
+            {reference.s_spec && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground">S-Spec {reference.s_spec}</span>}
+          </p>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="secondary">{reference.source.name}</Badge>
             <Badge variant="outline" className={confirmed ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}>
@@ -181,6 +186,14 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
           </div>
         </div>
         <div className="flex gap-2">
+          {item.model !== reference.display_name && (
+            <Button size="sm" variant="outline" disabled={locked || busy} title={`Rename this item to “${reference.display_name}”`} onClick={onUseName}>
+              Use this name
+            </Button>
+          )}
+          <Button size="sm" variant="outline" disabled={locked || busy} title="Copy any specs this item does not have yet; yours are never overwritten" onClick={onRefill}>
+            Fill in missing specs
+          </Button>
           {!confirmed && (
             <Button size="sm" disabled={locked || busy} onClick={onConfirm}>
               <Check /> Confirm
@@ -195,55 +208,64 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
         </div>
       </div>
 
-      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-        {visible.map(([key, value]) => {
-          const override = overrides.get(key.toLowerCase());
-          return (
-            <div key={key} className="min-w-0 border-b border-border/50 pb-1.5">
-              <dt className="text-xs text-muted-foreground">{key}</dt>
-              <dd className="break-words text-sm">
-                <span className={cn(override !== undefined && "text-muted-foreground line-through")}>{show(value)}</span>
-                {override !== undefined && (
-                  <span className="ml-2 font-medium">
-                    {show(override)} <Badge variant="outline" className="ml-1 align-middle">your value</Badge>
-                  </span>
-                )}
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
-      {entries.length > COLLAPSED_SPECS && (
-        <Button variant="ghost" size="sm" onClick={() => setAll(!all)}>
-          {all ? "Show fewer" : `Show all ${entries.length} fields`}
-        </Button>
-      )}
-      {entries.length === 0 && <p className="text-sm text-muted-foreground">This record has no published specifications.</p>}
-
-      {refs.length > 0 && (
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium">Sources cited</h3>
-          <ul className="space-y-0.5 text-sm text-muted-foreground">
-            {refs.map((r, i) => (
-              <li key={i} className="break-words">
-                {/^https?:\/\//.test(r) ? (
-                  <a className="underline" href={r} target="_blank" rel="noopener noreferrer">
-                    {r}
-                  </a>
-                ) : (
-                  r
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <p className="text-xs text-muted-foreground">
-        Imported specs from {reference.source.name} (snapshot {reference.source_version}, {new Date(reference.imported_at).toLocaleDateString()}
-        {where.file ? `, ${where.file}${where.line ? ` line ${where.line}` : ""}` : ""}). {reference.source.licence ?? ""} They are shown for
-        reference and never replace your own fields; values you enter under Specifications take precedence.
+      <p className="text-sm text-muted-foreground">
+        Its specs were copied onto this item: see <b>Specifications</b> above. They are yours to edit, and unlinking keeps them.
       </p>
+      <details className="rounded-md border px-3 py-2">
+        <summary className="cursor-pointer text-sm text-muted-foreground">The original record in the dataset</summary>
+        <div className="mt-3 space-y-4">
+        <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          {visible.map(([key, value]) => {
+            const override = overrides.get(key.toLowerCase());
+            return (
+              <div key={key} className="min-w-0 border-b border-border/50 pb-1.5">
+                <dt className="text-xs text-muted-foreground">{key}</dt>
+                <dd className="break-words text-sm">
+                  <span className={cn(override !== undefined && "text-muted-foreground line-through")}>{show(value)}</span>
+                  {override !== undefined && (
+                    <span className="ml-2 font-medium">
+                      {show(override)} <Badge variant="outline" className="ml-1 align-middle">your value</Badge>
+                    </span>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+        {entries.length > COLLAPSED_SPECS && (
+          <Button variant="ghost" size="sm" onClick={() => setAll(!all)}>
+            {all ? "Show fewer" : `Show all ${entries.length} fields`}
+          </Button>
+        )}
+        {entries.length === 0 && <p className="text-sm text-muted-foreground">This record has no published specifications.</p>}
+
+        {refs.length > 0 && (
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium">Sources cited</h3>
+            <ul className="space-y-0.5 text-sm text-muted-foreground">
+              {refs.map((r, i) => (
+                <li key={i} className="break-words">
+                  {/^https?:\/\//.test(r) ? (
+                    <a className="underline" href={r} target="_blank" rel="noopener noreferrer">
+                      {r}
+                    </a>
+                  ) : (
+                    r
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Imported specs from {reference.source.name} (snapshot {reference.source_version}, {new Date(reference.imported_at).toLocaleDateString()}
+          {where.file ? `, ${where.file}${where.line ? ` line ${where.line}` : ""}` : ""}). {reference.source.licence ?? ""} They are shown for
+          reference and never replace your own fields; values you enter under Specifications take precedence.
+        </p>
+
+        </div>
+      </details>
     </div>
   );
 }
@@ -270,6 +292,24 @@ export function ReferencePanel({ item, locked }: { item: ItemDetail; locked: boo
     onSuccess: (u, v) => done(u, v.confidence === "confirmed" ? "Match confirmed" : "Saved as a candidate"),
     onError: (e) => toast.error(e.message),
   });
+  const refill = useMutation({
+    mutationFn: () => api.linkReference(item.id, item.reference!.id, item.identification_confidence === "candidate" ? "candidate" : "confirmed"),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["item", item.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      toast.success("Specs updated");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const rename = useMutation({
+    mutationFn: (name: string) => api.updateItem(item.id, { model: name }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["item", item.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      toast.success("Name updated");
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const unlink = useMutation({
     mutationFn: () => api.unlinkReference(item.id),
     onSuccess: (u) => {
@@ -283,8 +323,8 @@ export function ReferencePanel({ item, locked }: { item: ItemDetail; locked: boo
   const reference = item.reference;
 
   return (
-    <section className="space-y-3 rounded-lg border border-dashed p-4">
-      <h2 className="text-sm font-medium text-muted-foreground">Reference data</h2>
+    <section className="space-y-3 rounded-xl border border-dashed p-5 sm:p-6">
+      <h2 className="text-base font-semibold tracking-tight">Matched record</h2>
       {locked && (
         <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
           You have unsaved changes. Save or revert them before changing the match.
@@ -301,7 +341,9 @@ export function ReferencePanel({ item, locked }: { item: ItemDetail; locked: boo
           item={item}
           reference={reference}
           locked={locked}
-          busy={link.isPending || unlink.isPending}
+          busy={link.isPending || unlink.isPending || rename.isPending || refill.isPending}
+          onRefill={() => refill.mutate()}
+          onUseName={() => rename.mutate(reference.display_name)}
           onConfirm={() => link.mutate({ id: reference.id, confidence: "confirmed" })}
           onChange={() => setChanging(true)}
           onUnlink={() => setConfirmUnlink(true)}

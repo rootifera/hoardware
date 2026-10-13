@@ -4,7 +4,7 @@ from app.models import Item, ReferenceImport, ReferenceModel, ReferenceSource
 from app.reference.base import build_keys, match_key, token_keys_of
 from app.reference.cpudb import CpuDbAdapter
 from app.reference.runner import run_import
-from tests.cpudb_data import HEADER, row, write_vendor
+from tests.cpudb_data import row, write_vendor
 
 
 def read(directory):
@@ -165,7 +165,7 @@ def test_changed_rows_are_updated_in_place_and_links_survive(tmp_path, db, clien
     detail = client.get(f"/api/v1/items/{item['id']}").json()
     assert detail["reference_model_id"] == ref.id
     assert detail["reference"]["specs"]["Socket"] == "S7 (corrected)"
-    assert detail["attributes"] == {"Socket": "my override"}  # user override untouched
+    assert detail["attributes"]["Socket"] == "my override"  # the user's value is untouched
 
 
 def test_dry_run_saves_nothing(tmp_path, db):

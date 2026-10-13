@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -59,6 +60,44 @@ def list_manufacturers(
     return list(session.scalars(stmt))
 
 
+@router.get("/attribute-keys", response_model=list[str], tags=["items"])
+def list_attribute_keys(
+    session: SessionDep,
+    category_id: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+):
+    """Spec names already used in items' own specifications (most used first),
+    optionally within one category, so new entries reuse the same wording."""
+    where = "WHERE attributes <> '{}'::jsonb" + (" AND category_id = :category" if category_id is not None else "")
+    rows = session.execute(
+        text(
+            f"SELECT k, count(*) AS uses FROM items, jsonb_object_keys(attributes) AS k {where}"
+            " GROUP BY k ORDER BY uses DESC, k LIMIT :limit"
+        ),
+        {"limit": limit, **({"category": category_id} if category_id is not None else {})},
+    )
+    return [name for name, _ in rows]
+
+
+@router.get("/attribute-values", response_model=list[str], tags=["items"])
+def list_attribute_values(
+    session: SessionDep,
+    key: Annotated[str, Query(min_length=1, max_length=60)],
+    category_id: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Values already used for one spec name (most used first), for suggestions."""
+    where = "WHERE attributes ? :key" + (" AND category_id = :category" if category_id is not None else "")
+    rows = session.execute(
+        text(
+            f"SELECT v, count(*) AS uses FROM (SELECT attributes ->> :key AS v FROM items {where}) s"
+            " WHERE v IS NOT NULL AND v <> '' GROUP BY v ORDER BY uses DESC, v LIMIT :limit"
+        ),
+        {"key": key, "limit": limit, **({"category": category_id} if category_id is not None else {})},
+    )
+    return [value for value, _ in rows]
+
+
 EXPORT_COLUMNS = [
     "inventory_code",
     "category",
@@ -75,7 +114,9 @@ EXPORT_COLUMNS = [
     "position",
     "notes",
     "acquired_on",
+    "verified_on",
     "identification_confidence",
+    "specs",
     "created_at",
     "updated_at",
 ]
@@ -84,6 +125,8 @@ EXPORT_COLUMNS = [
 def _cell(value) -> str:
     if value is None:
         return ""
+    if isinstance(value, dict):  # the item's own specs, as JSON
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")) if value else ""
     text_value = value.isoformat() if hasattr(value, "isoformat") else str(value)
     # Neutralise spreadsheet formula injection.
     if text_value[:1] in ("=", "+", "-", "@", "\t", "\r"):
@@ -120,7 +163,9 @@ def export_items_csv(filters: FiltersDep):
                     Item.order,
                     Item.notes,
                     Item.acquired_on,
+                    Item.verified_on,
                     Item.identification_confidence,
+                    Item.attributes,
                     Item.created_at,
                     Item.updated_at,
                 ),

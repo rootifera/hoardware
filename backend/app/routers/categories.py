@@ -23,7 +23,7 @@ def list_categories(session: SessionDep):
 
 @router.post("", response_model=CategoryOut, status_code=201)
 def create_category(body: CategoryIn, session: SessionDep):
-    category = Category(**body.model_dump())
+    category = Category(**body.model_dump(mode="json"))
     session.add(category)
     try:
         session.commit()
@@ -38,7 +38,7 @@ def update_category(category_id: int, body: CategoryUpdate, session: SessionDep)
     category = session.get(Category, category_id)
     if category is None:
         raise HTTPException(404, "category not found")
-    for name, value in body.model_dump(exclude_unset=True).items():
+    for name, value in body.model_dump(mode="json", exclude_unset=True).items():
         if value is None:
             raise HTTPException(422, f"{name} cannot be null")
         setattr(category, name, value)

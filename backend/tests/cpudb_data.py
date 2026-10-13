@@ -39,3 +39,22 @@ def write_vendor(directory: Path, name: str, rows: list[list[str]], header: list
         writer.writerow(header or HEADER)
         writer.writerows(rows)
     return path
+
+
+SSPEC_HEADER = [
+    "Manufacturer", "Family", "S-Spec number", "Speed", "Bus speed", "L2 cache size", "Package type",
+    "Part number", *[f"Alternative part number {i}" for i in range(1, 7)], *[f"Reference {i}" for i in range(1, 6)],
+]
+
+
+def write_sspecs(directory: Path, rows: list[dict[str, str]]) -> Path:
+    """The Intel S-Spec supplemental table (made-up rows) in its usual place."""
+    folder = directory / "supplemental_db"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "cpu-db.supplemetal.Intel.S-Spec_numbers.csv"
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(SSPEC_HEADER)
+        for row in rows:
+            writer.writerow([row.get(name, "") for name in SSPEC_HEADER])
+    return path

@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Iterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
@@ -22,6 +21,7 @@ router = APIRouter(tags=["photos"])
 SessionDep = Annotated[Session, Depends(get_session)]
 
 MAX_FILES_PER_REQUEST = 20
+MAX_REQUEST_FILES_FACTOR = 5  # a request may carry at most this many max-size files in total
 
 
 def _read_limited(upload: UploadFile, limit: int) -> bytes:
@@ -48,8 +48,12 @@ def upload_photos(
 
     # Validate everything before storing anything.
     prepared = []
+    total = 0
     for upload in files:
         data = _read_limited(upload, settings.max_upload_bytes)
+        total += len(data)
+        if total > settings.max_upload_bytes * MAX_REQUEST_FILES_FACTOR:
+            raise HTTPException(413, "too much data in one request; upload fewer photos at a time")
         if not data:
             raise HTTPException(422, f"{upload.filename or 'file'} is empty")
         try:

@@ -142,7 +142,9 @@ def test_link_confirm_and_unlink(client, make_item, cpudb):
     body = r.json()
     assert body["reference_model_id"] == ref_id and body["identification_confidence"] == "candidate"
     assert body["reference"]["specs"]["Socket"] == "Socket 7"
-    assert body["attributes"] == {"Socket": "my own value"}  # imported and user values stay separate
+    # The match's specs are now the item's own; what the user typed wins.
+    assert body["attributes"]["Socket"] == "my own value"
+    assert body["attributes"]["Speed"] == "150MHz" and body["attributes"]["Package"] == "SPGA"
     assert body["model"] == "My CPU" and body["manufacturer"] == "Acme"  # item fields are never overwritten
 
     r = client.post(f"{API}/items/{item['id']}/reference-match", json={"reference_model_id": ref_id})
@@ -152,7 +154,7 @@ def test_link_confirm_and_unlink(client, make_item, cpudb):
     body = r.json()
     assert body["reference"] is None and body["reference_model_id"] is None
     assert body["identification_confidence"] == "unidentified"
-    assert body["attributes"] == {"Socket": "my own value"}
+    assert body["attributes"]["Socket"] == "my own value" and body["attributes"]["Speed"] == "150MHz"  # kept after unlinking
 
 
 def test_link_validation(client, make_item, cpudb):
@@ -181,3 +183,47 @@ def test_identification_filter_still_works_after_linking(client, make_item, cpud
     client.post(f"{API}/items/{item['id']}/reference-match", json={"reference_model_id": ref_id, "confidence": "confirmed"})
     page = client.get(f"{API}/items", params={"identification_confidence": "confirmed"}).json()
     assert [i["model"] for i in page["items"]] == ["linked"]
+
+
+def test_suggestions_while_typing_use_the_same_ranking(client, cpudb):
+    r = client.get(f"{API}/reference-suggestions", params={"q": "a80503150 q0939"})
+    result = r.json()
+    assert r.status_code == 200 and result[0]["match_type"] == "exact"
+    assert result[0]["reference"]["model"] == "A80503150 Q0939"
+    spec_only = client.get(f"{API}/reference-suggestions", params={"q": "Q974"}).json()
+    assert [c["reference"]["model"] for c in spec_only] == ["A80503150 Q974"] and spec_only[0]["match_type"] == "token"
+    by_name = client.get(f"{API}/reference-suggestions", params={"q": "widget mmx"}).json()
+    assert by_name and all(c["match_type"] == "text" for c in by_name)
+    assert client.get(f"{API}/reference-suggestions", params={"q": "zzzz nothing"}).json() == []
+    assert client.get(f"{API}/reference-suggestions", params={"q": "x"}).status_code == 422
+    assert len(client.get(f"{API}/reference-suggestions", params={"q": "widget", "limit": 2}).json()) <= 2
+
+
+def test_suggestions_are_empty_without_a_dataset(client):
+    assert client.get(f"{API}/reference-suggestions", params={"q": "pentium"}).json() == []
+
+
+def test_creating_an_item_with_a_picked_match(client, cats, cpudb):
+    ref = client.get(f"{API}/reference-suggestions", params={"q": "A80503150 Q0939"}).json()[0]["reference"]
+    r = client.post(f"{API}/items", json={"category_id": cats["CPU"], "model": "Widget MMX", "reference_model_id": ref["id"], "identification_confidence": "confirmed"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["reference_model_id"] == ref["id"] and body["identification_confidence"] == "confirmed"
+    assert body["reference"]["model"] == "A80503150 Q0939"
+    bad = client.post(f"{API}/items", json={"category_id": cats["CPU"], "model": "x", "reference_model_id": 999999})
+    assert bad.status_code == 422
+
+
+def test_batch_copies_all_carry_the_match(client, cats, cpudb):
+    ref = client.get(f"{API}/reference-suggestions", params={"q": "A80503150 Q0939"}).json()[0]["reference"]
+    r = client.post(f"{API}/items/batch", json={"item": {"category_id": cats["CPU"], "model": "Widget MMX", "reference_model_id": ref["id"]}, "copies": 3})
+    ids = [c["id"] for c in r.json()["created"]]
+    assert all(client.get(f"{API}/items/{i}").json()["reference_model_id"] == ref["id"] for i in ids)
+    assert client.post(f"{API}/items/batch", json={"item": {"category_id": cats["CPU"], "model": "x", "reference_model_id": 999999}, "copies": 2}).status_code == 422
+
+
+def test_short_fragments_do_not_produce_text_matches(client, make_item, cpudb):
+    assert client.get(f"{API}/reference-suggestions", params={"q": "AC-1"}).json() == []
+    assert client.get(f"{API}/reference-suggestions", params={"q": "ab"}).json() == []
+    item = make_item("AC-1", manufacturer="Acme")
+    assert candidates(client, item["id"]) == []

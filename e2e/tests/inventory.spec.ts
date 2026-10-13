@@ -95,6 +95,11 @@ test("Nested locations show items from their descendants", async ({ page, reques
 
   await page.getByLabel("Include items in sub-locations").uncheck();
   await expect(page.getByRole("link", { name: new RegExp(`Boxed CPU ${RUN}`) })).toHaveCount(0);
+
+  // Opening a deep location expands the tree down to it.
+  await page.goto(`/locations?id=${box.id}`);
+  await expect(page.getByRole("heading", { name: "CPU Box 3" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Location tree" }).getByRole("button", { name: "CPU Box 3" })).toBeVisible();
 });
 
 test("Attach a photo to an item", async ({ page, request }) => {
@@ -132,7 +137,8 @@ test("Reference matching is optional and stays out of the way", async ({ page, r
   await expect(page.getByText("Shares a code: sl23l")).toBeVisible();
   await page.getByRole("button", { name: "Confirm match" }).first().click();
   await expect(page.getByText("Match confirmed").first()).toBeVisible();
-  await expect(page.getByText("Imported specs from CPU-DB")).toBeVisible();
+  // The match's specs are now the item's own: they sit in Specifications, editable.
+  await expect(page.getByLabel("Speed", { exact: true })).toHaveValue("180MHz");
   // The item's own fields are untouched.
   await expect(page.getByLabel("Model / description")).toHaveValue(`Unknown CPU ${RUN}`);
   await page.screenshot({ path: "test-results/ref-linked.png", fullPage: true });
@@ -193,4 +199,534 @@ test("Ten identical CPUs sit at ten exact positions in one location", async ({ p
   await page.getByLabel("Position").fill("3");
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await expect(page.getByText(/position 3 is already taken/)).toBeVisible();
+});
+
+test("Bulk actions: range-select, set a status, then move with positions", async ({ page, request }) => {
+  const a = await (await request.post("/api/v1/locations", { data: { name: `Bulk A ${RUN}` } })).json();
+  const b = await (await request.post("/api/v1/locations", { data: { name: `Bulk B ${RUN}` } })).json();
+  locationIds.push(a.id, b.id);
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Bulk CPU ${RUN}`;
+  await request.post("/api/v1/items/batch", {
+    data: { item: { category_id: cats[0].id, model, location_id: a.id }, copies: 6, order_start: 1 },
+  });
+  await trackByModel(request, model);
+  await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} holder`, location_id: b.id, order: 1 } });
+  await trackByModel(request, `${model} holder`);
+
+  await page.goto(`/?q=${encodeURIComponent(model)}&location=${a.id}&sort=position`);
+  const boxes = page.getByRole("checkbox", { name: /^Select HW-/ });
+  await expect(boxes).toHaveCount(6);
+  await boxes.nth(0).click();
+  await boxes.nth(3).click({ modifiers: ["Shift"] });
+  const bar = page.getByRole("region", { name: "Bulk actions" });
+  await expect(bar.getByText("4 items selected")).toBeVisible();
+
+  await bar.getByRole("button", { name: "Test status" }).click();
+  await page.getByRole("menuitem", { name: "Dead" }).click();
+  await expect(page.getByText("Updated 4 items")).toBeVisible();
+  const items = (await (await request.get(`/api/v1/items?location_id=${a.id}&sort=position&limit=50`)).json()).items;
+  expect(items.map((i: { test_status: string }) => i.test_status)).toEqual(["Dead", "Dead", "Dead", "Dead", "Untested", "Untested"]);
+
+  // Move the selection to B, numbering on after the item already at position 1.
+  await bar.getByRole("button", { name: "Move…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Choose the destination" }).click();
+  await page.getByPlaceholder(/Search locations/).fill(`bulk b ${RUN}`);
+  await page.getByRole("button", { name: new RegExp(`^Bulk B ${RUN}`) }).click();
+  await dialog.getByLabel(/Number on after the last one/).check();
+  await expect(dialog.getByText("4 items will move.")).toBeVisible();
+  await dialog.getByRole("button", { name: "Move", exact: true }).click();
+  await expect(page.getByText("Moved 4 items")).toBeVisible();
+
+  const inB = (await (await request.get(`/api/v1/items?location_id=${b.id}&sort=position&limit=50`)).json()).items;
+  expect(inB.map((i: { order: number }) => i.order)).toEqual([1, 2, 3, 4, 5]);
+  const left = (await (await request.get(`/api/v1/items?location_id=${a.id}&limit=50`)).json()).items;
+  expect(left).toHaveLength(2);
+});
+
+test("CSV import: check first, see the bad row, skip it, import the rest", async ({ page, request }) => {
+  const model = `Imported CPU ${RUN}`;
+  const csv = [
+    "category,manufacturer,model,test_status,location,position",
+    `CPU,Intel,${model} one,Full Test,Import Shelf ${RUN} > Tray,1`,
+    `CPU,Intel,${model} two,POST,Import Shelf ${RUN} > Tray,2`,
+    `NOPE,Intel,${model} bad,Untested,,`,
+  ].join("\n");
+
+  await page.goto("/import");
+  await page.locator('input[type="file"]').setInputFiles({ name: "items.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  const result = page.getByRole("region", { name: "Check result" });
+  await expect(result.getByText("3 rows")).toBeVisible();
+  // Missing locations are errors until allowed (rows 1 and 2), plus the unknown category (row 3).
+  await expect(result.getByText("3 with errors")).toBeVisible();
+  await expect(result.getByText(/unknown category “NOPE”/)).toBeVisible();
+  await expect(result.getByText(/unknown location/).first()).toBeVisible();
+  await page.getByLabel("Create missing locations").check();
+  await expect(result.getByText("Will create locations:")).toBeVisible();
+  await expect(result.getByText("1 with errors")).toBeVisible();
+  await expect(result.getByText("2 ready")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Import 2 item/ })).toBeDisabled();
+
+  await page.getByLabel("Skip rows with errors").check();
+  await page.getByRole("button", { name: "Import 2 items" }).click();
+  await expect(page.getByText("Imported 2 items.")).toBeVisible();
+  await trackByModel(request, model);
+
+  const tops = (await (await request.get(`/api/v1/locations?q=${encodeURIComponent(`import shelf ${RUN}`)}`)).json()).items;
+  for (const l of tops.filter((x: { parent_id: number | null }) => x.parent_id === null)) locationIds.push(l.id);
+  const got = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(model)}&sort=position&limit=20`)).json()).items;
+  expect(got.map((i: { model: string; order: number }) => [i.model, i.order])).toEqual([[`${model} one`, 1], [`${model} two`, 2]]);
+  expect(got[0].location_path).toBe(`Import Shelf ${RUN} > Tray`);
+});
+
+test("Test-status chips show counts and filter", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Chip CPU ${RUN}`;
+  for (const [suffix, status] of [["a", "Untested"], ["b", "Untested"], ["c", "Unknown"], ["d", "Dead"]]) {
+    await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} ${suffix}`, test_status: status } });
+  }
+  await trackByModel(request, model);
+
+  await page.goto(`/?q=${encodeURIComponent(model)}`);
+  const chips = page.getByRole("group", { name: "Test status" });
+  await expect(chips.getByRole("button", { name: /^Untested 2$/ })).toBeVisible();
+  await expect(chips.getByRole("button", { name: /^Unknown 1$/ })).toBeVisible();
+  await expect(chips.getByRole("button", { name: /^Dead 1$/ })).toBeVisible();
+  await expect(chips.getByRole("button", { name: /^POST 0$/ })).toBeVisible();
+
+  await chips.getByRole("button", { name: /^Unknown/ }).click();
+  await expect(page).toHaveURL(/test=Unknown/);
+  await expect(page.getByText("1 item", { exact: true })).toBeVisible();
+  await expect(chips.getByRole("button", { name: /^Untested 2$/ })).toBeVisible(); // other counts stay visible
+  await chips.getByRole("button", { name: /^All/ }).click();
+  await expect(page.getByText("4 items", { exact: true })).toBeVisible();
+});
+
+test("Test history: status changes are logged, tests can be logged by hand", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `History CPU ${RUN}` } })).json();
+  created.push(item.id);
+
+  await page.goto(`/items/${item.id}`);
+  const history = page.getByRole("region", { name: "Test history" }).or(page.locator("section", { hasText: "Test history" }));
+  await expect(page.getByText("No test logged yet")).toBeVisible();
+  await expect(history.getByText(/Nothing logged yet/)).toBeVisible();
+
+  // Changing the status on the form leaves a history entry.
+  await page.getByLabel("Test status").click();
+  await page.getByRole("option", { name: "POST", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(history.locator("li")).toHaveCount(1);
+  await expect(page.getByText(/^Last tested \d{4}-\d{2}-\d{2}$/)).toBeVisible();
+
+  // Log a test by hand, on an earlier date.
+  await history.getByRole("button", { name: "Log a test" }).click();
+  await page.getByLabel("Date").fill("2025-01-15");
+  await page.getByLabel("What was tested").fill("3DMark99 on a P2-400");
+  await page.getByRole("button", { name: "Save entry" }).click();
+  await expect(page.getByText("Test logged")).toBeVisible();
+  await expect(history.locator("li")).toHaveCount(2);
+  await expect(history.getByText("3DMark99 on a P2-400")).toBeVisible();
+  await expect(history.getByText("2025-01-15")).toBeVisible();
+  expect((await (await request.get(`/api/v1/items/${item.id}`)).json()).test_status).toBe("Full Test");
+
+  // Remove the hand-made entry again: the item's status is untouched.
+  await history.getByRole("button", { name: "Remove the 2025-01-15 entry" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
+  await expect(history.locator("li")).toHaveCount(1);
+  expect((await (await request.get(`/api/v1/items/${item.id}`)).json()).test_status).toBe("Full Test");
+});
+
+test("A photo can be made the cover and becomes the list thumbnail", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Cover card ${RUN}` } })).json();
+  created.push(item.id);
+  const png = (b64: string) => Buffer.from(b64, "base64");
+  const red = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const files = [0, 1].map((n) => ({ name: `p${n}.png`, mimeType: "image/png", buffer: png(red) }));
+  await page.goto(`/items/${item.id}`);
+  await page.locator('input[type="file"]').setInputFiles(files);
+  await expect(page.getByText("2 photos added")).toBeVisible();
+  const before = (await (await request.get(`/api/v1/items/${item.id}`)).json()).photos;
+
+  await page.getByRole("button", { name: "Make this the cover photo" }).click();
+  await expect(async () => {
+    const after = (await (await request.get(`/api/v1/items/${item.id}`)).json()).photos;
+    expect(after[0].id).toBe(before[1].id);
+  }).toPass();
+  const summary = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Cover card ${RUN}`)}`)).json()).items[0];
+  expect(summary.thumbnail_url).toContain(`/photos/${before[1].id}/`);
+});
+
+test("Stock-take: verify what is in the box, then see what is missing", async ({ page, request }) => {
+  const box = await (await request.post("/api/v1/locations", { data: { name: `Stock Box ${RUN}` } })).json();
+  locationIds.push(box.id);
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Stock CPU ${RUN}`;
+  await request.post("/api/v1/items/batch", { data: { item: { category_id: cats[0].id, model, location_id: box.id }, copies: 3, order_start: 1 } });
+  await trackByModel(request, model);
+
+  await page.goto(`/locations?id=${box.id}`);
+  const boxes = page.getByRole("checkbox", { name: /^Select HW-/ });
+  await expect(boxes).toHaveCount(3);
+  await boxes.nth(0).click();
+  await boxes.nth(1).click();
+  await page.getByRole("region", { name: "Bulk actions" }).getByRole("button", { name: "Verified" }).click();
+  await expect(page.getByText("Updated 2 items")).toBeVisible();
+
+  // Only the item nobody ticked has not been seen.
+  await page.getByLabel("Stock-take").click();
+  await page.getByRole("option", { name: "Not seen in 30 days" }).click();
+  await expect(page.getByText("1 item", { exact: true })).toBeVisible();
+  await expect(page.getByText("#3", { exact: true })).toBeVisible();
+
+  const items = (await (await request.get(`/api/v1/items?location_id=${box.id}&sort=position&limit=10`)).json()).items;
+  const detail = await (await request.get(`/api/v1/items/${items[0].id}`)).json();
+  expect(detail.verified_on).toBe(new Date().toLocaleDateString("en-CA"));
+});
+
+test("Quick Add warns when you already have matching items", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Dupe Check ${RUN}`;
+  for (let i = 0; i < 2; i++) await request.post("/api/v1/items", { data: { category_id: cats[0].id, model } });
+  await trackByModel(request, model);
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(model);
+  await expect(qa.getByText("You already have 2 matching items.")).toBeVisible();
+  await qa.getByLabel("Model / description").fill(`${model} but different`);
+  await expect(qa.getByText(/You already have/)).toHaveCount(0);
+});
+
+test("Print list: grouped by location, ordered by position, chrome hidden in print", async ({ page, request }) => {
+  const shelf = await (await request.post("/api/v1/locations", { data: { name: `Print Shelf ${RUN}` } })).json();
+  const box = await (await request.post("/api/v1/locations", { data: { name: "Box A", parent_id: shelf.id } })).json();
+  locationIds.push(shelf.id);
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Print CPU ${RUN}`;
+  await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} third`, location_id: box.id, order: 3 } });
+  await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} first`, location_id: box.id, order: 1 } });
+  await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} loose`, location_id: shelf.id } });
+  await trackByModel(request, model);
+
+  await page.goto(`/locations?id=${shelf.id}`);
+  const popup = page.waitForEvent("popup");
+  await page.getByRole("link", { name: "Print list" }).click();
+  const sheet = await popup;
+  await expect(sheet.getByRole("heading", { name: `Print Shelf ${RUN}`, level: 1 })).toBeVisible();
+  await expect(sheet.getByText("3 items including sub-locations")).toBeVisible();
+  await expect(sheet.getByRole("heading", { name: `Print Shelf ${RUN} > Box A` })).toBeVisible();
+  const rows = await sheet.locator("tbody tr").allTextContents();
+  expect(rows.map((r) => r.match(/Print CPU \w+ (first|third|loose)/)?.[1])).toEqual(["loose", "first", "third"]);
+
+  await sheet.emulateMedia({ media: "print" });
+  await expect(sheet.getByRole("banner")).toBeHidden(); // the app header does not print
+  await expect(sheet.getByRole("button", { name: "Print" })).toBeHidden();
+  await sheet.screenshot({ path: "test-results/print-list.png", fullPage: true });
+});
+
+test("Spec names are suggested, and 'Add another like this' prefills Quick Add", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const model = `Like This ${RUN}`;
+  const first = await (
+    await request.post("/api/v1/items", { data: { category_id: cats[0].id, model, manufacturer: "Acme", part_number: "AC-1", attributes: { [`Socket${RUN}`]: "7" } } })
+  ).json();
+  created.push(first.id);
+
+  await page.goto(`/items/${first.id}`);
+  await expect(page.locator(`#attribute-key-suggestions option[value="Socket${RUN}"]`)).toHaveCount(1);
+
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Add another like this" }).click();
+  const qa = page.getByRole("dialog");
+  await expect(qa.getByLabel("Model / description")).toHaveValue(model);
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("Acme");
+  await expect(qa.getByLabel("Part number")).toHaveValue("AC-1");
+  await expect(qa.getByText("You already have 1 matching item.")).toBeVisible();
+  await qa.getByLabel("Condition").click();
+  await page.getByRole("option", { name: "Poor", exact: true }).click();
+  await qa.getByRole("button", { name: "Save & close" }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+  await trackByModel(request, model);
+  const items = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(model)}&limit=10`)).json()).items;
+  expect(items.map((i: { condition: string }) => i.condition).sort()).toEqual(["Poor", "Unknown"]);
+});
+
+test("The ? key lists the keyboard shortcuts", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("?");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Quick add", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+
+  // Start in the wrong category on purpose: the chip code still finds it.
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "RAM", exact: true }).click();
+  await page.waitForTimeout(300);
+  const before = await qa.boundingBox();
+  await qa.getByLabel("Part number").fill("SL32A");
+
+  // An exact code shows up as a suggestion, but NOTHING is filled until it is chosen.
+  const suggestions = qa.getByRole("group", { name: "Suggestions" });
+  await expect(suggestions.getByRole("button", { name: /BX80524R300128\s*SL32A/ })).toBeVisible();
+  // It floats over the form: the dialog keeps exactly the same size and position.
+  const during = await qa.boundingBox();
+  expect(during).toEqual(before);
+  const list = await suggestions.boundingBox();
+  expect(list!.y).toBeGreaterThan(before!.y); // anchored inside the dialog, under the field
+  await page.waitForTimeout(800);
+  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("");
+  await expect(qa.getByLabel("Part number")).toHaveValue("SL32A");
+  await expect(qa.getByLabel("Category")).toContainText("RAM");
+
+  await suggestions.getByRole("button", { name: /BX80524R300128\s*SL32A/ }).click();
+  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel");
+  await expect(qa.getByLabel("Part number")).toHaveValue("BX80524R300128");
+  await expect(qa.getByLabel("Model / description")).toHaveValue("Celeron 300MHz 128KiB L2");
+  await expect(qa.getByLabel("Category")).toContainText("CPU");
+  // Picking closes the dropdown, and the dialog still has the same size: the note sits in reserved space.
+  await expect(suggestions).toHaveCount(0);
+  expect(await qa.boundingBox()).toEqual(before);
+  expect(await qa.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+
+  await qa.getByRole("button", { name: "Save & close" }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+
+  // Only touch the item we just made: the newest one with that part number.
+  const newest = (await (await request.get("/api/v1/items?q=sl32a&sort=newest&limit=1")).json()).items[0];
+  created.push(newest.id);
+  const detail = await (await request.get(`/api/v1/items/${newest.id}`)).json();
+  expect(detail.category_name).toBe("CPU");
+  expect(detail.identification_confidence).toBe("confirmed");
+  expect(detail.reference?.family).toBe("Celeron");
+  expect(detail.reference?.specs["L2 cache"]).toBe("128KiB");
+  // ...and the specs live on the item itself, not only in the dataset.
+  expect(detail.part_number).toBe("BX80524R300128"); // the order code alone...
+  expect(detail.attributes).toMatchObject({ "S-Spec": "SL32A", Speed: "300MHz", "Bus speed": "66MHz", "L2 cache": "128KiB", Package: "SEPP Rev. 1", Family: "Celeron" }); // ...and the S-Spec as its own spec
+  await page.goto(`/items/${newest.id}`);
+  await expect(page.getByText("Match confirmed").first()).toBeVisible();
+  await expect(page.getByLabel("Part number")).toHaveValue("BX80524R300128");
+  await expect(page.getByLabel("S-Spec", { exact: true })).toHaveValue("SL32A");
+  await expect(page.getByLabel("Speed", { exact: true })).toHaveValue("300MHz");
+  await expect(page.getByLabel("Bus speed", { exact: true })).toHaveValue("66MHz");
+  await expect(page.getByLabel("L2 cache", { exact: true })).toHaveValue("128KiB");
+  await expect(page.getByLabel("Package", { exact: true })).toHaveValue("SEPP Rev. 1");
+  // A CPU is set up as a CPU: no chipset fields.
+  await expect(page.getByLabel("Chipset", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Chipset maker")).toHaveCount(0);
+});
+
+test("A pick can be undone, and ignoring the list changes nothing", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "CPU", exact: true }).click();
+
+  await qa.getByLabel("Part number").fill("SL32A");
+  const suggestions = qa.getByRole("group", { name: "Suggestions" });
+  await suggestions.getByRole("button").first().click();
+  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await qa.getByRole("button", { name: "Remove the match" }).click();
+  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel"); // the filled-in values stay, now just plain text
+
+  // A partial code lists several records; ignoring the list leaves the form as typed.
+  await qa.getByLabel("Part number").fill("A80503");
+  await expect(suggestions).toBeVisible();
+  await qa.getByLabel("Model / description").fill("My own name");
+  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByLabel("Model / description")).toHaveValue("My own name");
+});
+
+
+test("The suggestion dropdown: arrow key, Esc closes only it, and the dialog never resizes", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "CPU", exact: true }).click();
+  await page.waitForTimeout(300);
+  const before = await qa.boundingBox();
+
+  await qa.getByLabel("Part number").fill("A80503");
+  const suggestions = qa.getByRole("group", { name: "Suggestions" });
+  await expect(suggestions).toBeVisible();
+  expect(await qa.boundingBox()).toEqual(before);
+
+  // Esc closes the dropdown but not the dialog.
+  await page.keyboard.press("Escape");
+  await expect(suggestions).toHaveCount(0);
+  await expect(qa).toBeVisible();
+  // Typing more brings it back; the arrow key moves into the list and Enter-ing a row picks it.
+  await qa.getByLabel("Part number").fill("A805031");
+  await expect(suggestions).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await expect(suggestions.getByRole("button").first()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  expect(await qa.boundingBox()).toEqual(before);
+
+  // The duplicate hint and the position shortcut also leave the size alone.
+  await qa.getByLabel("Model / description").fill("Pentium");
+  await page.waitForTimeout(600);
+  expect(await qa.boundingBox()).toEqual(before);
+});
+
+
+test("Typing the S-Spec into Model gets a proper name, full specs, and a useful inventory row", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "CPU", exact: true }).click();
+
+  // The code typed into the Model field (not Part number).
+  await qa.getByLabel("Model / description").fill("SL32A");
+  const suggestions = qa.getByRole("group", { name: "Suggestions" });
+  const row = suggestions.getByRole("button", { name: /Celeron 300MHz 128KiB L2/ });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("300MHz · 66MHz bus · 128KiB L2 · SEPP Rev. 1"); // the S-Spec table's bus speed too
+  await expect(row).toContainText("BX80524R300128"); // the order code...
+  await expect(row.getByTitle("S-Spec: the code printed on the chip")).toHaveText("SL32A"); // ...and the S-Spec as a separate chip
+  await row.click();
+
+  // The model is replaced by the proper name (it was only the code), and the status line says what was filled.
+  await expect(qa.getByLabel("Model / description")).toHaveValue("Celeron 300MHz 128KiB L2");
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel");
+  await expect(qa.getByLabel("Part number")).toHaveValue("BX80524R300128");
+  await expect(qa.getByText(/300MHz · 66MHz bus · 128KiB L2/)).toBeVisible();
+  await qa.getByRole("button", { name: "Save & close" }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+
+  const newest = (await (await request.get("/api/v1/items?q=sl32a&sort=newest&limit=1")).json()).items[0];
+  created.push(newest.id);
+  // The inventory row now says what the chip is, not just "Intel SL32A".
+  await page.goto("/?q=sl32a");
+  const link = page.locator(`a[href="/items/${newest.id}"]`);
+  await expect(link).toContainText("Intel Celeron 300MHz 128KiB L2");
+  await expect(link).toContainText("SL32A · 300MHz · 66MHz bus · 128KiB L2 · SEPP Rev. 1");
+});
+
+test("An item added as just the code can take the proper name from its match", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const cpu = cats.find((c: { name: string }) => c.name === "CPU").id;
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cpu, model: `SL32A`, manufacturer: "Intel" } })).json();
+  created.push(item.id);
+
+  await page.goto(`/items/${item.id}`);
+  await page.getByRole("button", { name: "Find reference match" }).click();
+  await page.getByRole("button", { name: "Confirm match" }).first().click();
+  await expect(page.getByText("Match confirmed").first()).toBeVisible();
+  await page.getByRole("button", { name: "Use this name" }).click();
+  await expect(page.getByText("Name updated")).toBeVisible();
+  await expect(page.getByLabel("Model / description")).toHaveValue("Celeron 300MHz 128KiB L2");
+  await expect(page.getByRole("button", { name: "Use this name" })).toHaveCount(0);
+  // Linking copied the specs onto the item, so they are searchable and unlinking keeps them.
+  const detail = await (await request.get(`/api/v1/items/${item.id}`)).json();
+  expect(detail.attributes.Package).toBe("SEPP Rev. 1");
+  await page.getByRole("button", { name: "Unlink" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Unlink" }).click();
+  await expect(page.getByText("Not matched to a reference model (optional).")).toBeVisible();
+  expect((await (await request.get(`/api/v1/items/${item.id}`)).json()).attributes["Bus speed"]).toBe("66MHz");
+  const found = (await (await request.get(`/api/v1/items?q=${encodeURIComponent("sepp 66mhz")}&limit=50`)).json()).items;
+  expect(found.map((i: { id: number }) => i.id)).toContain(item.id);
+});
+
+
+test("Each category has its own fields: a CPU is set up as a CPU, a graphics card as a graphics card", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const id = (name: string) => cats.find((c: { name: string }) => c.name === name).id;
+  const cpu = await (await request.post("/api/v1/items", { data: { category_id: id("CPU"), model: `Field CPU ${RUN}` } })).json();
+  const gpu = await (await request.post("/api/v1/items", { data: { category_id: id("GPU/VGA"), model: `Field GPU ${RUN}` } })).json();
+  created.push(cpu.id, gpu.id);
+
+  await page.goto(`/items/${cpu.id}`);
+  await expect(page.getByRole("heading", { name: "CPU specifications" })).toBeVisible();
+  for (const label of ["Family", "Speed", "Bus speed", "L2 cache", "Socket", "Package", "Stepping"]) {
+    await expect(page.getByLabel(label, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByLabel("Chipset", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Memory size")).toHaveCount(0);
+
+  // Fill a spec, save, and it is searchable and shown on the inventory row.
+  await page.getByLabel("Speed", { exact: true }).fill("233MHz");
+  await page.getByLabel("Socket", { exact: true }).fill("Socket 7");
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect((await (await request.get(`/api/v1/items/${cpu.id}`)).json()).attributes).toEqual({ Speed: "233MHz", Socket: "Socket 7" });
+  const hits = (await (await request.get(`/api/v1/items?q=${encodeURIComponent("233mhz socket 7")}`)).json()).items;
+  expect(hits.map((i: { id: number }) => i.id)).toContain(cpu.id);
+
+  await page.goto(`/items/${gpu.id}`);
+  await expect(page.getByRole("heading", { name: "GPU/VGA specifications" })).toBeVisible();
+  await page.getByLabel("Chipset maker").fill("NVIDIA");
+  await page.getByLabel("Chipset", { exact: true }).fill("RIVA TNT2 Ultra");
+  await page.getByLabel("Memory size").fill("32MB");
+  await expect(page.getByLabel("Speed", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  const saved = await (await request.get(`/api/v1/items/${gpu.id}`)).json();
+  expect([saved.chipset_manufacturer, saved.chipset, saved.attributes["Memory size"]]).toEqual(["NVIDIA", "RIVA TNT2 Ultra", "32MB"]);
+});
+
+test("Category fields can be edited on the Categories page and change the item page", async ({ page, request }) => {
+  const created_cat = await (await request.post("/api/v1/categories", { data: { name: `Field Test ${RUN}` } })).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: created_cat.id, model: `Custom ${RUN}` } })).json();
+  created.push(item.id);
+  try {
+    await page.goto(`/items/${item.id}`);
+    await expect(page.getByText(/No fields are set up for this category yet/)).toBeVisible();
+
+    await page.goto("/categories");
+    await page.getByRole("button", { name: `Fields of Field Test ${RUN}` }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Add field" }).click();
+    await dialog.getByLabel("Field name").fill("Wattage");
+    await dialog.getByLabel("Example shown in the empty field").fill("e.g. 300W");
+    await dialog.getByRole("button", { name: "Chipset", exact: true }).click(); // a column-backed field
+    await dialog.getByRole("button", { name: "Save fields" }).click();
+    await expect(page.getByText(/fields saved/)).toBeVisible();
+
+    await page.goto(`/items/${item.id}`);
+    await expect(page.getByLabel("Wattage")).toHaveAttribute("placeholder", "e.g. 300W");
+    await expect(page.getByLabel("Chipset", { exact: true })).toBeVisible();
+  } finally {
+    await request.delete(`/api/v1/items/${item.id}`);
+    await request.delete(`/api/v1/categories/${created_cat.id}`);
+  }
 });

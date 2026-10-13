@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 from app.enums import Condition, IdentificationConfidence, PhotoRole, TestStatus
 
@@ -34,14 +34,49 @@ class Page(BaseModel, Generic[T]):
 # --- categories ---------------------------------------------------------------
 
 
+COLUMN_FIELDS = ("chipset_manufacturer", "chipset", "revision")
+
+
+class CategoryField(BaseModel):
+    name: Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=60)]
+    hint: Annotated[str, BeforeValidator(_strip), Field(max_length=120)] = ""
+    # Stored in this item column instead of the item's specs.
+    column: Literal["chipset_manufacturer", "chipset", "revision"] | None = None
+
+
+def _check_fields(fields: list[CategoryField]) -> list[CategoryField]:
+    if len(fields) > 40:
+        raise ValueError("at most 40 fields per category")
+    seen: set[str] = set()
+    columns: set[str] = set()
+    for f in fields:
+        if f.name.lower() in seen:
+            raise ValueError(f"field “{f.name}” is listed twice")
+        seen.add(f.name.lower())
+        if f.column:
+            if f.column in columns:
+                raise ValueError(f"more than one field uses the {f.column} column")
+            columns.add(f.column)
+    return fields
+
+
 class CategoryIn(BaseModel):
     name: Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=100)]
     sort_order: int = 0
+    fields: list[CategoryField] = Field(default_factory=list)
+
+    _fields = field_validator("fields")(_check_fields)
 
 
 class CategoryUpdate(BaseModel):
     name: Annotated[Annotated[str, Field(min_length=1, max_length=100)] | None, BeforeValidator(_strip)] = None
     sort_order: int | None = None
+    fields: list[CategoryField] | None = None
+
+    @field_validator("fields")
+    @classmethod
+    def _valid_fields(cls, value):
+        return None if value is None else _check_fields(value)
 
 
 class CategoryOut(BaseModel):
@@ -50,6 +85,7 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     sort_order: int
+    fields: list[CategoryField]
 
 
 # --- locations ----------------------------------------------------------------
@@ -134,6 +170,8 @@ class ItemSummary(BaseModel):
     location_path: str | None
     order: int | None
     thumbnail_url: str | None
+    # Key specs of the matched reference model, if any (one line).
+    spec_line: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -156,6 +194,14 @@ class ReferenceSummary(BaseModel):
     revision: str | None
     source_key: str
     highlights: dict[str, Any]
+    # The part number split the way it is printed: the order code, and the
+    # short S-Spec code on the chip (Intel). part_number is the two together.
+    order_code: str | None = None
+    s_spec: str | None = None
+    # A readable name built from the record, e.g. "Celeron 300MHz 128KiB L2".
+    display_name: str
+    # Key specs on one line, e.g. "300MHz · 66MHz bus · 128KiB L2 · SEPP Rev. 1".
+    spec_line: str
 
 
 class ReferenceDetail(ReferenceSummary):
@@ -187,12 +233,34 @@ class ReferenceMatchIn(BaseModel):
     reference_model_id: int
     # "candidate" = looks right but not verified; "confirmed" = the user checked.
     confidence: Literal["candidate", "confirmed"] = "confirmed"
+    # Copy the record's specs onto the item (names it already has are kept).
+    copy_specs: bool = True
+
+
+class TestLogIn(BaseModel):
+    __test__ = False
+
+    status: TestStatus
+    tested_on: date | None = None  # defaults to today
+    notes: OptText = None
+
+
+class TestLogOut(BaseModel):
+    __test__ = False
+
+    id: int
+    tested_on: date
+    status: TestStatus
+    notes: str | None
+    created_at: datetime
 
 
 class ItemDetail(ItemSummary):
+    last_tested_on: date | None = None  # date of the newest test-history entry
     test_notes: str | None
     notes: str | None
     acquired_on: date | None
+    verified_on: date | None
     reference_model_id: int | None
     reference: ReferenceDetail | None = None
     attributes: dict[str, Any]
@@ -223,6 +291,9 @@ class ItemCreate(_ItemFields):
     order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
     notes: OptText = None
     acquired_on: date | None = None
+    verified_on: date | None = None
+    # Set when the user picked a suggestion while adding the item.
+    reference_model_id: int | None = None
     identification_confidence: IdentificationConfidence = IdentificationConfidence.UNIDENTIFIED
     attributes: dict[str, Any] = Field(default_factory=dict)
 
@@ -266,6 +337,7 @@ class ItemUpdate(_ItemFields):
     order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
     notes: OptText = None
     acquired_on: date | None = None
+    verified_on: date | None = None
     identification_confidence: IdentificationConfidence | None = None
     attributes: dict[str, Any] | None = None
 
@@ -277,3 +349,98 @@ class ItemUpdate(_ItemFields):
         if value is None:
             raise ValueError("this field cannot be null")
         return value
+
+
+# --- bulk actions ---------------------------------------------------------------
+
+MAX_BULK_IDS = 10_000
+
+
+class BulkFilter(BaseModel):
+    """The inventory list filters, to select "everything matching" server-side."""
+
+    q: Annotated[str | None, Field(max_length=200)] = None
+    category_id: list[int] = Field(default_factory=list)
+    manufacturer: Annotated[str | None, Field(max_length=300)] = None
+    condition: list[Condition] = Field(default_factory=list)
+    test_status: list[TestStatus] = Field(default_factory=list)
+    identification_confidence: list[IdentificationConfidence] = Field(default_factory=list)
+    location_id: int | None = None
+    include_descendants: bool = True
+    unassigned: bool = False
+    never_verified: bool = False
+    verified_before: date | None = None
+
+
+class BulkSelection(BaseModel):
+    """Either explicit ``ids`` or a ``filter`` (everything matching it), minus ``exclude_ids``."""
+
+    ids: Annotated[list[int], Field(max_length=MAX_BULK_IDS)] | None = None
+    filter: BulkFilter | None = None
+    exclude_ids: Annotated[list[int], Field(max_length=MAX_BULK_IDS)] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _exactly_one(self):
+        if (self.ids is None) == (self.filter is None):
+            raise ValueError("provide exactly one of ids or filter")
+        return self
+
+
+class BulkChanges(BaseModel):
+    """Only the fields present are applied."""
+
+    condition: Condition | None = None
+    test_status: TestStatus | None = None
+    test_notes: OptText = None  # null clears the notes
+    category_id: int | None = None
+    location_id: int | None = None  # null = no location
+    verified: bool | None = None  # true = seen in place today, false = clear
+
+    @field_validator("condition", "test_status", "category_id", "verified")
+    @classmethod
+    def _not_null(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("this field cannot be null")
+        return value
+
+
+class BulkIn(BaseModel):
+    selection: BulkSelection
+    changes: BulkChanges
+    # What happens to item positions when items move to another location:
+    #   clear  - positions are dropped (default)
+    #   keep   - each keeps its number; refused if any would clash
+    #   append - numbered on after the highest position in the destination,
+    #            keeping their relative order
+    positions: Literal["clear", "keep", "append"] = "clear"
+    dry_run: bool = False
+
+
+class BulkOut(BaseModel):
+    matched: int
+    moved: int  # items whose location actually changed
+    clashes: int  # positions that would collide (positions="keep")
+    dry_run: bool
+
+
+# --- CSV import -------------------------------------------------------------------
+
+
+class ImportRowError(BaseModel):
+    line: int
+    message: str
+
+
+class ImportReport(BaseModel):
+    committed: bool  # rows were written
+    blocked: bool  # commit requested but nothing written because of errors
+    total_rows: int
+    valid_rows: int
+    error_rows: int
+    imported: int
+    errors: list[ImportRowError]
+    errors_truncated: bool
+    warnings: list[str]
+    new_categories: list[str]  # would be (or were) created
+    new_locations: list[str]
+    preview: list[dict[str, Any]]

@@ -72,6 +72,17 @@ def get_reference_model(reference_id: int, session: SessionDep):
     return service.detail_of(session, ref)
 
 
+@router.get("/reference-suggestions", response_model=list[ReferenceCandidate])
+def reference_suggestions(
+    session: SessionDep,
+    q: Annotated[str, Query(min_length=2, max_length=200)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 6,
+):
+    """Suggestions for text typed while adding an item: a part number, an
+    S-Spec or ordering code, or a name. Empty when no dataset is imported."""
+    return service.find_candidates_for(session, part_number=q, model=q, limit=limit)
+
+
 @router.get("/items/{item_id}/reference-candidates", response_model=list[ReferenceCandidate])
 def reference_candidates(item_id: int, session: SessionDep, limit: Annotated[int, Query(ge=1, le=50)] = 15):
     item = session.get(Item, item_id)
@@ -85,8 +96,16 @@ def link_reference(item_id: int, body: ReferenceMatchIn, session: SessionDep):
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(404, "item not found")
-    if session.get(ReferenceModel, body.reference_model_id) is None:
+    ref = session.get(ReferenceModel, body.reference_model_id)
+    if ref is None:
         raise HTTPException(422, "reference model does not exist")
+    if body.copy_specs:
+        item.attributes = service.merge_specs(item.attributes or {}, service.spec_snapshot(ref))
+        # An item saved before the S-Spec was its own field has the combined
+        # "order code + S-Spec" as its part number: keep just the order code.
+        order_code = service.order_code_of(ref.part_number, ref.specs.get("S-Spec"))
+        if order_code and ref.specs.get("S-Spec") and (item.part_number or "").strip().lower() == (ref.part_number or "").lower():
+            item.part_number = order_code
     item.reference_model_id = body.reference_model_id
     item.identification_confidence = body.confidence
     session.commit()
@@ -95,7 +114,8 @@ def link_reference(item_id: int, body: ReferenceMatchIn, session: SessionDep):
 
 @router.delete("/items/{item_id}/reference-match", response_model=ItemDetail)
 def unlink_reference(item_id: int, session: SessionDep):
-    """Unlink a (bad) match. The item's own fields and overrides are untouched."""
+    """Unlink a (bad) match. The item keeps its own fields and specs, including
+    any copied from the match; only the link and the confirmation go."""
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(404, "item not found")

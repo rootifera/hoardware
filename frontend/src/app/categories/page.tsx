@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { ListChecks, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -14,13 +14,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { CategoryFieldsDialog } from "@/components/category-fields-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { Category } from "@/lib/types";
 
-function CategoryRow({ category, onDelete }: { category: Category; onDelete: () => void }) {
+function CategoryRow({ category, onDelete, onEditFields }: { category: Category; onDelete: () => void; onEditFields: () => void }) {
   const queryClient = useQueryClient();
   const rename = useMutation({
     mutationFn: (name: string) => api.updateCategory(category.id, { name }),
@@ -45,6 +46,9 @@ function CategoryRow({ category, onDelete }: { category: Category; onDelete: () 
         }}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       />
+      <Button variant="outline" size="sm" className="shrink-0" onClick={onEditFields} aria-label={`Fields of ${category.name}`}>
+        <ListChecks /> {category.fields.length} field{category.fields.length === 1 ? "" : "s"}
+      </Button>
       <Button variant="ghost" size="icon" aria-label={`Delete ${category.name}`} onClick={onDelete}>
         <Trash2 />
       </Button>
@@ -57,6 +61,7 @@ export default function CategoriesPage() {
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories });
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Category | null>(null);
+  const [editing, setEditing] = useState<Category | null>(null);
 
   const create = useMutation({
     mutationFn: () => api.createCategory({ name: name.trim(), sort_order: (categories.data?.length ?? 0) * 10 }),
@@ -81,11 +86,11 @@ export default function CategoriesPage() {
   });
 
   return (
-    <div className="mx-auto max-w-xl space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Categories</h1>
         <p className="text-sm text-muted-foreground">
-          Rename a category by editing it in place. A category that still has items cannot be deleted.
+          Rename a category by editing it in place. “Fields” sets what items of that category are described with (a CPU: speed, bus, cache…). A category that still has items cannot be deleted.
         </p>
       </div>
       <form
@@ -107,10 +112,11 @@ export default function CategoriesPage() {
       ) : (
         <ul>
           {categories.data.map((c) => (
-            <CategoryRow key={c.id} category={c} onDelete={() => setDeleting(c)} />
+            <CategoryRow key={c.id} category={c} onDelete={() => setDeleting(c)} onEditFields={() => setEditing(c)} />
           ))}
         </ul>
       )}
+      <CategoryFieldsDialog category={editing} onClose={() => setEditing(null)} />
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

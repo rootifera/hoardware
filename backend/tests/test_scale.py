@@ -92,6 +92,10 @@ def test_endpoints_stay_fast_with_100k_items(client, big):
     page, elapsed = timed(client, sort="name", limit=50)
     assert elapsed < 0.75
 
+    start = time.perf_counter()
+    facets = client.get(f"{API}/items/facets", params={"q": "model"}).json()
+    assert time.perf_counter() - start < 1.0 and sum(facets.values()) == N
+
 
 def test_location_subtree_filter_at_scale(client, db, make_location, big):
     root = make_location("Root")

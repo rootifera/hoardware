@@ -167,3 +167,17 @@ def test_failed_upload_leaves_no_orphans(client, make_item, photos_dir, monkeypa
     assert r.status_code == 503
     assert stored_files(photos_dir) == []
     assert client.get(f"{API}/items/{item['id']}").json()["photos"] == []
+
+
+def test_one_request_cannot_carry_unbounded_total_data(client, make_item, photos_dir):
+    import os
+
+    item = make_item("card")
+    noisy = io.BytesIO()
+    Image.frombytes("RGB", (600, 400), os.urandom(600 * 400 * 3)).save(noisy, format="PNG")
+    data = noisy.getvalue()
+    assert 500_000 < len(data) < 1_048_576  # each file is under the 1 MB test limit
+    files = [(f"p{i}.png", data, "image/png") for i in range(8)]  # ~5.8 MB in total
+    r = upload(client, item["id"], *files)
+    assert r.status_code == 413 and "too much data" in r.json()["detail"]
+    assert stored_files(photos_dir) == []

@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import Select, String, cast, func, or_, select
@@ -27,6 +28,8 @@ class ItemFilters:
     location_id: int | None = None
     include_descendants: bool = True
     unassigned: bool = False
+    never_verified: bool = False
+    verified_before: date | None = None  # verified earlier than this, or never
 
 
 def _like_escape(value: str) -> str:
@@ -64,6 +67,11 @@ def apply_filters(session: Session, stmt: Select, f: ItemFilters) -> Select:
         stmt = stmt.where(Item.test_status.in_([s.value for s in f.test_statuses]))
     if f.confidences:
         stmt = stmt.where(Item.identification_confidence.in_([c.value for c in f.confidences]))
+
+    if f.never_verified:
+        stmt = stmt.where(Item.verified_on.is_(None))
+    elif f.verified_before is not None:
+        stmt = stmt.where(or_(Item.verified_on.is_(None), Item.verified_on < f.verified_before))
 
     if f.unassigned:
         stmt = stmt.where(Item.location_id.is_(None))

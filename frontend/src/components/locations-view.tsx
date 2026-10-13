@@ -1,11 +1,14 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, FolderPlus, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, FolderPlus, MapPin, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { MoveDialog, toBulkFilter } from "@/components/bulk";
+import { SimpleSelect } from "@/components/simple-select";
+import { VERIFIED_OPTIONS } from "@/components/filter-bar";
 import { ItemList } from "@/components/item-list";
 import { LocationDialog, type LocationDialogState } from "@/components/location-dialog";
 import { useQuickAdd } from "@/components/quick-add";
@@ -36,7 +39,7 @@ function useChildren(parentId: number | null, enabled = true) {
   });
 }
 
-function Children({ parentId, depth, selectedId, onSelect }: { parentId: number | null; depth: number; selectedId: number | null; onSelect: (id: number) => void }) {
+function Children({ parentId, depth, selectedId, openIds, onSelect }: { parentId: number | null; depth: number; selectedId: number | null; openIds: Set<number>; onSelect: (id: number) => void }) {
   const children = useChildren(parentId);
   if (children.isPending) return <Skeleton className="my-1 ml-4 h-6 w-40" />;
   if (children.isError) return <p className="px-2 py-1 text-sm text-destructive">{children.error.message}</p>;
@@ -44,7 +47,7 @@ function Children({ parentId, depth, selectedId, onSelect }: { parentId: number 
   return (
     <>
       {locations.map((l) => (
-        <TreeNode key={l.id} location={l} depth={depth} selectedId={selectedId} onSelect={onSelect} />
+        <TreeNode key={l.id} location={l} depth={depth} selectedId={selectedId} openIds={openIds} onSelect={onSelect} />
       ))}
       {children.hasNextPage && (
         <Button variant="ghost" size="sm" style={{ marginLeft: depth * 16 + 8 }} onClick={() => children.fetchNextPage()} disabled={children.isFetchingNextPage}>
@@ -55,8 +58,11 @@ function Children({ parentId, depth, selectedId, onSelect }: { parentId: number 
   );
 }
 
-function TreeNode({ location, depth, selectedId, onSelect }: { location: Location; depth: number; selectedId: number | null; onSelect: (id: number) => void }) {
-  const [expanded, setExpanded] = useState(false);
+function TreeNode({ location, depth, selectedId, openIds, onSelect }: { location: Location; depth: number; selectedId: number | null; openIds: Set<number>; onSelect: (id: number) => void }) {
+  // The path to the selected location opens by itself; a click on the arrow overrides that.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const expanded = override ?? openIds.has(location.id);
+  const setExpanded = (value: boolean) => setOverride(value);
   const selected = selectedId === location.id;
   return (
     <div>
@@ -80,7 +86,7 @@ function TreeNode({ location, depth, selectedId, onSelect }: { location: Locatio
         </button>
       </div>
       {expanded && location.has_children && (
-        <Children parentId={location.id} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} />
+        <Children parentId={location.id} depth={depth + 1} selectedId={selectedId} openIds={openIds} onSelect={onSelect} />
       )}
     </div>
   );
@@ -91,6 +97,10 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
   const { open: openQuickAdd } = useQuickAdd();
   const [exact, setExact] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [moveAll, setMoveAll] = useState(false);
+  const [verified, setVerified] = useState("");
+  const contents = { ...EMPTY_FILTERS, location: String(id), exact, verified };
+  const itemCount = useQuery({ queryKey: ["items", "count", contents], queryFn: () => api.itemCount(contents) });
   const location = useQuery({
     queryKey: ["location", id],
     queryFn: () => api.location(id),
@@ -139,6 +149,16 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
             <Button variant="outline" size="sm" onClick={() => openQuickAdd({ location: { id: l.id, full_name: l.full_name } })}>
               <Plus /> Add item here
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              render={<Link href={`/locations/print?id=${id}${exact ? "&exact=1" : ""}`} target="_blank" />}
+            >
+              <Printer /> Print list
+            </Button>
+            <Button variant="outline" size="sm" disabled={!itemCount.data} onClick={() => setMoveAll(true)}>
+              <ArrowRightLeft /> Move all items…
+            </Button>
             <Button variant="outline" size="sm" onClick={onAddChild}>
               <FolderPlus /> Sub-location
             </Button>
@@ -154,11 +174,22 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
       </div>
 
       <div className="space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" className="size-4 accent-primary" checked={!exact} onChange={(e) => setExact(!e.target.checked)} />
-          Include items in sub-locations
-        </label>
-        <ItemList filters={{ ...EMPTY_FILTERS, location: String(id), exact, sort: "position" }} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="size-4 accent-primary" checked={!exact} onChange={(e) => setExact(!e.target.checked)} />
+            Include items in sub-locations
+          </label>
+          <SimpleSelect
+            aria-label="Stock-take"
+            size="sm"
+            className="w-52"
+            value={verified}
+            onChange={setVerified}
+            anyLabel="All items (stock-take off)"
+            options={VERIFIED_OPTIONS}
+          />
+        </div>
+        <ItemList filters={{ ...contents, sort: "position" }} />
         <p className="text-xs text-muted-foreground">
           <Link className="underline" href={`/?location=${id}`}>
             Open in the full inventory view
@@ -166,6 +197,14 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
           for more filters.
         </p>
       </div>
+
+      <MoveDialog
+        open={moveAll}
+        onClose={() => setMoveAll(false)}
+        title={`Move everything out of “${l.name}”`}
+        selection={{ filter: toBulkFilter(contents) }}
+        count={itemCount.data ?? 0}
+      />
 
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
@@ -193,6 +232,14 @@ export function LocationsView() {
   const selected = params.get("id") ? Number(params.get("id")) : null;
   const [dialog, setDialog] = useState<LocationDialogState>(null);
   const roots = useChildren(null);
+  // Ancestors of the selected location (same query the detail panel uses, so one request).
+  const selectedLocation = useQuery({
+    queryKey: ["location", selected],
+    queryFn: () => api.location(selected!),
+    enabled: selected !== null,
+    retry: false,
+  });
+  const openIds = new Set(selectedLocation.data?.ancestors.map((a) => a.id) ?? []);
   const select = (id: number | null) => router.push(id ? `/locations?id=${id}` : "/locations", { scroll: false });
   const empty = roots.data && roots.data.pages[0].items.length === 0;
 
@@ -210,9 +257,9 @@ export function LocationsView() {
             No locations yet. Create a room or shelf, then nest boxes inside it.
           </div>
         ) : (
-          <div className="max-h-[70vh] overflow-y-auto" role="tree">
-            <Children parentId={null} depth={0} selectedId={selected} onSelect={select} />
-          </div>
+          <nav aria-label="Location tree" className="max-h-[70vh] overflow-y-auto">
+            <Children parentId={null} depth={0} selectedId={selected} openIds={openIds} onSelect={select} />
+          </nav>
         )}
       </aside>
       <section className="min-w-0">

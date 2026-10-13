@@ -52,6 +52,20 @@ from app.main import app  # noqa: E402
 
 SEED = ["CPU", "GPU/VGA", "Motherboard", "Sound Card", "RAM", "Storage", "Other"]
 
+# The same starting fields the migration gives the seeded categories.
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("seed_fields", Path(__file__).resolve().parent.parent / "alembic/versions/0008_category_fields.py")
+_seed_fields = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_seed_fields)
+DEFAULT_FIELDS = dict(_seed_fields.DEFAULTS)
+
+_spec9 = importlib.util.spec_from_file_location("seed_fields9", Path(__file__).resolve().parent.parent / "alembic/versions/0009_cpu_sspec_field.py")
+_seed_fields9 = importlib.util.module_from_spec(_spec9)
+_spec9.loader.exec_module(_seed_fields9)
+DEFAULT_FIELDS["cpu"] = _seed_fields9.with_sspec(list(DEFAULT_FIELDS["cpu"]))
+
 
 @pytest.fixture(autouse=True)
 def clean_state():
@@ -59,7 +73,10 @@ def clean_state():
         conn.execute(text("TRUNCATE items, photos, locations, categories, pending_deletions, reference_models, reference_imports, reference_sources RESTART IDENTITY CASCADE"))
         conn.execute(text("ALTER SEQUENCE inventory_code_seq RESTART"))
         for i, name in enumerate(SEED):
-            conn.execute(text("INSERT INTO categories (name, sort_order) VALUES (:n, :o)"), {"n": name, "o": i * 10})
+            conn.execute(
+                text("INSERT INTO categories (name, sort_order, fields) VALUES (:n, :o, CAST(:f AS jsonb))"),
+                {"n": name, "o": i * 10, "f": json.dumps(DEFAULT_FIELDS.get(name.lower(), []))},
+            )
     shutil.rmtree(_photos_dir, ignore_errors=True)
     _photos_dir.mkdir(parents=True, exist_ok=True)
     yield

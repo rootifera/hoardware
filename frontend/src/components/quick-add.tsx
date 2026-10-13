@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, Loader2 } from "lucide-react";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -19,11 +19,29 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api";
-import { CONDITIONS, TEST_STATUSES, type Condition, type TestStatus } from "@/lib/types";
+import {
+  CONDITIONS,
+  EMPTY_FILTERS,
+  TEST_STATUSES,
+  type Condition,
+  type ReferenceCandidate,
+  type ReferenceSummary,
+  type TestStatus,
+} from "@/lib/types";
+
+/** Optional starting values for the form (e.g. "add another like this"). */
+export interface QuickAddPreset {
+  location?: PickedLocation;
+  category?: string;
+  model?: string;
+  manufacturer?: string;
+  partNumber?: string;
+}
 
 interface QuickAddContext {
-  open: (preset?: { location?: PickedLocation }) => void;
+  open: (preset?: QuickAddPreset) => void;
 }
 
 const Ctx = createContext<QuickAddContext>({ open: () => {} });
@@ -51,9 +69,9 @@ function isTyping(target: EventTarget | null): boolean {
 
 export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setOpen] = useState(false);
-  const [preset, setPreset] = useState<{ location?: PickedLocation } | undefined>();
+  const [preset, setPreset] = useState<QuickAddPreset | undefined>();
 
-  const open = useCallback((p?: { location?: PickedLocation }) => {
+  const open = useCallback((p?: QuickAddPreset) => {
     setPreset(p);
     setOpen(true);
   }, []);
@@ -86,7 +104,7 @@ function QuickAddDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  preset?: { location?: PickedLocation };
+  preset?: QuickAddPreset;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -104,17 +122,17 @@ function QuickAddDialog({
   );
 }
 
-function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocation }; onClose: () => void }) {
+function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: () => void }) {
   const queryClient = useQueryClient();
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories });
   const modelRef = useRef<HTMLInputElement>(null);
 
   // Category and location are remembered between additions.
   const [remembered] = useState(readRemembered);
-  const [category, setCategory] = useState(remembered.category ?? "");
-  const [model, setModel] = useState("");
-  const [manufacturer, setManufacturer] = useState("");
-  const [partNumber, setPartNumber] = useState("");
+  const [category, setCategory] = useState(preset?.category ?? remembered.category ?? "");
+  const [model, setModel] = useState(preset?.model ?? "");
+  const [manufacturer, setManufacturer] = useState(preset?.manufacturer ?? "");
+  const [partNumber, setPartNumber] = useState(preset?.partNumber ?? "");
   const [condition, setCondition] = useState<Condition>("Unknown");
   const [testStatus, setTestStatus] = useState<TestStatus>("Untested");
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
@@ -122,6 +140,12 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
   const [files, setFiles] = useState<File[]>([]);
   const [copies, setCopies] = useState(1);
   const [position, setPosition] = useState("");
+  // A reference model picked from the suggestions (CPU categories only).
+  const [match, setMatch] = useState<ReferenceSummary | null>(null);
+  // The dropdown is closed (Esc, or focus left the field) for this typed text; typing again reopens it.
+  const [closedFor, setClosedFor] = useState<string | null>(null);
+  // Suggestions are for what the user types, never for values that arrived pre-filled.
+  const [typedByUser, setTypedByUser] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +156,53 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
     enabled: location !== null,
     staleTime: 0,
   });
+
+  // "You already have N of these": a quick guard against entering a part twice.
+  const lookup = useDebouncedValue(`${manufacturer} ${model}`.trim(), 300);
+  const existing = useQuery({
+    queryKey: ["items", "count", "quick-add", lookup],
+    queryFn: () => api.itemCount({ ...EMPTY_FILTERS, q: lookup }),
+    enabled: model.trim().length >= 3,
+  });
+
+  // Suggestions from an imported reference dataset. In a CPU category anything
+  // typed is looked up; elsewhere only something that looks like a chip code
+  // (an S-Spec or ordering code) is, and only exact identifier matches count.
+  // Nothing is ever filled in until the user picks a suggestion.
+  const categoryName = (categories.data ?? []).find((c) => String(c.id) === category)?.name ?? "";
+  const cpuCategory = /cpu|processor/i.test(categoryName);
+  const sources = useQuery({ queryKey: ["reference-sources"], queryFn: api.referenceSources, staleTime: 60_000 });
+  const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
+  const typed = useDebouncedValue(partNumber.trim().length >= 3 ? partNumber.trim() : model.trim(), 300);
+  const looksLikeCode = typed.length >= 4 && /\d/.test(typed) && !/\s{2,}/.test(typed);
+  const wantsSuggestions = typedByUser && hasDataset && match === null && typed.length >= 3 && (cpuCategory || looksLikeCode);
+  const suggestions = useQuery({
+    queryKey: ["reference-suggestions", typed],
+    queryFn: () => api.referenceSuggestions(typed),
+    enabled: wantsSuggestions,
+  });
+  const offered = (suggestions.data ?? []).filter((c) => cpuCategory || c.match_type !== "text");
+  const listOpen = wantsSuggestions && offered.length > 0 && closedFor !== typed;
+  // The dropdown hangs under the field the text is coming from.
+  const source: "part" | "model" = partNumber.trim().length >= 3 ? "part" : "model";
+
+  function pick(c: ReferenceCandidate) {
+    const r = c.reference;
+    setMatch(r);
+    if (r.manufacturer) setManufacturer(r.manufacturer);
+    // The part number is the order code; the S-Spec is saved as its own spec.
+    if (r.part_number) setPartNumber(r.order_code ?? r.part_number);
+    // Use the proper name unless the user wrote a real name of their own: an
+    // empty model, or one that is just the code they typed, is replaced.
+    const current = model.trim().toLowerCase();
+    const onlyTheCode = current === "" || current === typed.toLowerCase() || (r.part_number ?? "").toLowerCase().includes(current);
+    if (onlyTheCode) setModel(r.display_name);
+    // A CPU record belongs in the CPU category.
+    if (r.kind === "cpu" && !cpuCategory) {
+      const cpu = (categories.data ?? []).find((c2) => /cpu|processor/i.test(c2.name));
+      if (cpu) setCategory(String(cpu.id));
+    }
+  }
 
   const categoryOptions = (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }));
   // Fall back to the first category when nothing (valid) is remembered.
@@ -169,15 +240,16 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
       }
       // Several copies are several separate items (own code, condition, test status),
       // at consecutive positions when a start position is given.
+      const matched = match ? { reference_model_id: match.id, identification_confidence: "confirmed" as const } : {};
       const batch =
         copies > 1
           ? await api.createItemsBatch({
-              item: { ...fields, location_id: location?.id ?? null },
+              item: { ...fields, ...matched, location_id: location?.id ?? null },
               copies,
               order_start: start,
             })
           : null;
-      const item = batch ? null : await api.createItem({ ...fields, location_id: location?.id ?? null, order: start });
+      const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: location?.id ?? null, order: start });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ category: effectiveCategory, location } satisfies Remembered));
       let photoNote = "";
       if (item && files.length) {
@@ -210,6 +282,8 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
         setPartNumber("");
         setNotes("");
         setFiles([]);
+        setMatch(null);
+        setTypedByUser(false);
         // Carry on from the next free spot.
         if (start !== null) setPosition(String(start + copies));
         setCopies(1);
@@ -224,15 +298,67 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
     }
   }
 
+  const dropdown = listOpen && (
+    <div
+      role="group"
+      aria-label="Suggestions"
+      className="absolute top-full right-0 z-50 mt-1 w-[32rem] max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+    >
+      <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">From the CPU database. Pick one to fill in the details.</p>
+      <div className="max-h-64 overflow-y-auto p-1">
+        {offered.map((c) => (
+          <button
+            key={c.reference.id}
+            type="button"
+            className="grid w-full gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+            onClick={() => pick(c)}
+          >
+            <span className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="min-w-0 truncate font-medium">
+                {[c.reference.manufacturer, c.reference.display_name].filter(Boolean).join(" ")}
+              </span>
+              <span className="flex shrink-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+                {c.reference.order_code ?? c.reference.part_number ?? c.reference.model}
+                {c.reference.s_spec && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground" title="S-Spec: the code printed on the chip">
+                    {c.reference.s_spec}
+                  </span>
+                )}
+              </span>
+            </span>
+            {c.reference.spec_line && <span className="truncate text-xs text-muted-foreground">{c.reference.spec_line}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  // Esc closes just the dropdown; the arrow key moves from the field into it; leaving it closes it.
+  const dropdownKeys = {
+    onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!listOpen) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setClosedFor(typed);
+      } else if (e.key === "ArrowDown" && (e.target as HTMLElement).tagName === "INPUT") {
+        e.preventDefault();
+        e.currentTarget.querySelector<HTMLButtonElement>('[role="group"] button')?.focus();
+      }
+    },
+    onBlur: (e: React.FocusEvent<HTMLDivElement>) => {
+      if (listOpen && !e.currentTarget.contains(e.relatedTarget as Node | null)) setClosedFor(typed);
+    },
+  };
+
   return (
     <form
-      className="grid gap-4"
+      // minmax(0, 1fr): long content (e.g. the match bar) must wrap, not widen the dialog.
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4"
       onSubmit={(e) => {
         e.preventDefault();
         void save(true);
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-[11rem_1fr]">
+      <div className="grid gap-4 sm:grid-cols-[11rem_minmax(0,1fr)]">
         <div className="grid gap-1.5">
           <Label htmlFor="qa-category">Category</Label>
           <SimpleSelect
@@ -244,7 +370,7 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
             placeholder="Category"
           />
         </div>
-        <div className="grid gap-1.5">
+        <div className="relative grid gap-1.5" {...dropdownKeys}>
           <Label htmlFor="qa-model">Model / description</Label>
           <Input
             id="qa-model"
@@ -253,8 +379,12 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
             autoComplete="off"
             placeholder="e.g. Unknown ISA VGA card"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => {
+              setModel(e.target.value);
+              setTypedByUser(true);
+            }}
           />
+          {source === "model" && dropdown}
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -267,10 +397,42 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
             onChange={(e) => setManufacturer(e.target.value)}
           />
         </div>
-        <div className="grid gap-1.5">
+        <div className="relative grid gap-1.5" {...dropdownKeys}>
           <Label htmlFor="qa-pn">Part number</Label>
-          <Input id="qa-pn" autoComplete="off" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} />
+          <Input
+            id="qa-pn"
+            autoComplete="off"
+            value={partNumber}
+            onChange={(e) => {
+              setPartNumber(e.target.value);
+              setTypedByUser(true);
+            }}
+          />
+          {source === "part" && dropdown}
         </div>
+      </div>
+      {/* One line of reserved height, so nothing here ever resizes the dialog. */}
+      <div className="flex h-6 items-center gap-2 text-sm" aria-live="polite">
+        {match ? (
+          <>
+            <span
+              className="min-w-0 flex-1 truncate text-emerald-700 dark:text-emerald-300"
+              title={`From the CPU database: ${match.display_name} · ${match.spec_line}`}
+            >
+              ✓ Specs will be saved with the item{match.spec_line ? <span className="text-muted-foreground"> · {match.spec_line}</span> : null}
+            </span>
+            <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove the match" onClick={() => setMatch(null)}>
+              <X />
+            </Button>
+          </>
+        ) : model.trim().length >= 3 && (existing.data ?? 0) > 0 ? (
+          <span className="truncate text-xs text-muted-foreground">
+            You already have {existing.data!.toLocaleString()} matching item{existing.data === 1 ? "" : "s"}.{" "}
+            <Link className="underline" href={`/?q=${encodeURIComponent(lookup)}`} target="_blank">
+              View
+            </Link>
+          </span>
+        ) : null}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
@@ -307,7 +469,14 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="qa-position">Position</Label>
+          <div className="flex h-5 items-center justify-between">
+            <Label htmlFor="qa-position">Position</Label>
+            {location && nextFree.data !== undefined && position === "" && (
+              <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setPosition(String(nextFree.data))}>
+                use {nextFree.data}
+              </button>
+            )}
+          </div>
           <Input
             id="qa-position"
             type="number"
@@ -319,15 +488,6 @@ function QuickAddForm({ preset, onClose }: { preset?: { location?: PickedLocatio
           />
         </div>
       </div>
-      {location && nextFree.data !== undefined && position === "" && (
-        <button
-          type="button"
-          className="-mt-2 justify-self-start text-xs text-muted-foreground underline"
-          onClick={() => setPosition(String(nextFree.data))}
-        >
-          Use next free position ({nextFree.data})
-        </button>
-      )}
       <div className="grid gap-1.5">
         <Label htmlFor="qa-notes">Notes</Label>
         <Textarea id="qa-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

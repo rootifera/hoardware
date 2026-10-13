@@ -64,3 +64,50 @@ def test_csv_export_streams_many_rows(client, db):
     db.execute(text("INSERT INTO items (category_id, model) SELECT (SELECT min(id) FROM categories), 'bulk ' || g FROM generate_series(1, 2500) g"))
     db.commit()
     assert len(parse(client.get(f"{API}/export/items.csv"))) == 2500
+
+
+def test_seeded_categories_come_with_their_own_fields(client):
+    by_name = {c["name"]: c for c in client.get(f"{API}/categories").json()}
+    cpu = [f["name"] for f in by_name["CPU"]["fields"]]
+    assert cpu[:6] == ["Family", "S-Spec", "Speed", "Bus speed", "L2 cache", "Socket"] and "Chipset" not in cpu
+    gpu = {f["name"]: f["column"] for f in by_name["GPU/VGA"]["fields"]}
+    assert gpu["Chipset maker"] == "chipset_manufacturer" and gpu["Chipset"] == "chipset" and gpu["Memory size"] is None
+    assert by_name["Other"]["fields"] == []
+
+
+def test_editing_a_categorys_fields(client, cats):
+    fields = [{"name": "Socket", "hint": "e.g. Socket 7"}, {"name": "Clock", "hint": ""}, {"name": "Chipset", "column": "chipset"}]
+    r = client.patch(f"{API}/categories/{cats['Other']}", json={"fields": fields})
+    assert r.status_code == 200
+    assert r.json()["fields"] == [
+        {"name": "Socket", "hint": "e.g. Socket 7", "column": None},
+        {"name": "Clock", "hint": "", "column": None},
+        {"name": "Chipset", "hint": "", "column": "chipset"},
+    ]
+    assert client.patch(f"{API}/categories/{cats['Other']}", json={"name": "Misc"}).json()["fields"][0]["name"] == "Socket"  # other edits keep them
+    created = client.post(f"{API}/categories", json={"name": "Network Card", "fields": [{"name": "Speed"}]})
+    assert created.status_code == 201 and created.json()["fields"][0]["name"] == "Speed"
+
+
+def test_field_validation(client, cats):
+    url = f"{API}/categories/{cats['Other']}"
+    assert client.patch(url, json={"fields": [{"name": "A"}, {"name": "a"}]}).status_code == 422  # duplicate
+    assert client.patch(url, json={"fields": [{"name": ""}]}).status_code == 422
+    assert client.patch(url, json={"fields": [{"name": "x", "column": "model"}]}).status_code == 422
+    two = [{"name": "A", "column": "chipset"}, {"name": "B", "column": "chipset"}]
+    assert client.patch(url, json={"fields": two}).status_code == 422
+    assert client.patch(url, json={"fields": [{"name": f"F{i}"} for i in range(41)]}).status_code == 422
+    assert client.patch(url, json={"fields": None}).status_code == 422
+
+
+def test_value_suggestions_for_a_spec(client, make_item, cats):
+    make_item("a", category="CPU", attributes={"Socket": "Socket 7"})
+    make_item("b", category="CPU", attributes={"Socket": "Socket 7"})
+    make_item("c", category="CPU", attributes={"Socket": "Socket 8"})
+    make_item("d", category="GPU/VGA", attributes={"Socket": "n/a"})
+    make_item("e", category="CPU", attributes={"Socket": ""})
+    everywhere = client.get(f"{API}/attribute-values", params={"key": "Socket"}).json()
+    assert everywhere[0] == "Socket 7" and sorted(everywhere) == sorted(["Socket 7", "Socket 8", "n/a"])  # most used first
+    assert client.get(f"{API}/attribute-values", params={"key": "Socket", "category_id": cats["CPU"]}).json() == ["Socket 7", "Socket 8"]
+    assert client.get(f"{API}/attribute-values", params={"key": "Nope"}).json() == []
+    assert client.get(f"{API}/attribute-values", params={"key": "Socket", "limit": 1}).json() == ["Socket 7"]

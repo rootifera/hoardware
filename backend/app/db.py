@@ -10,6 +10,9 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=10,
+    # current_date / now() follow the configured timezone, so "today" matches
+    # the user's day rather than UTC's.
+    connect_args={"options": f"-c timezone={get_settings().tz}"},
 )
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 

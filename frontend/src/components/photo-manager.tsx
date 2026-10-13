@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, Star, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { SimpleSelect } from "@/components/simple-select";
@@ -45,8 +45,8 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
     onError: (e) => toast.error(e.message),
   });
   const update = useMutation({
-    mutationFn: (v: { id: number; role?: PhotoRole; caption?: string | null }) =>
-      api.updatePhoto(item.id, v.id, { role: v.role, caption: v.caption }),
+    mutationFn: (v: { id: number; role?: PhotoRole; caption?: string | null; sort_order?: number }) =>
+      api.updatePhoto(item.id, v.id, { role: v.role, caption: v.caption, sort_order: v.sort_order }),
     onSuccess: refresh,
     onError: (e) => toast.error(e.message),
   });
@@ -66,10 +66,9 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
   }
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Photos</h2>
+    <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-        {item.photos.map((photo) => (
+        {item.photos.map((photo, index) => (
           <div key={photo.id} className="group space-y-1.5 rounded-lg border p-1.5">
             <button type="button" className="block w-full" onClick={() => setViewing(photo)} aria-label="View photo">
               {/* eslint-disable-next-line @next/next/no-img-element -- thumbnails are pre-sized by the backend */}
@@ -84,6 +83,17 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
                 onChange={(role) => update.mutate({ id: photo.id, role: role as PhotoRole })}
                 options={PHOTO_ROLES.map((r) => ({ value: r, label: r }))}
               />
+              {index > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Make this the cover photo"
+                  title="Make this the cover photo (shown in lists)"
+                  onClick={() => update.mutate({ id: photo.id, sort_order: Math.min(...item.photos.map((p) => p.sort_order)) - 1 })}
+                >
+                  <Star />
+                </Button>
+              )}
               <Button variant="ghost" size="icon-sm" aria-label="Delete photo" onClick={() => setDeleting(photo)}>
                 <Trash2 />
               </Button>
@@ -116,6 +126,8 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
           disabled={upload.isPending}
           className={cn(
             "flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm text-muted-foreground transition-colors hover:bg-muted/50",
+            // With no photos yet the drop area fills the card instead of being a small square.
+            item.photos.length === 0 && "col-span-full aspect-[16/9]",
             dragging && "border-primary bg-muted/50",
           )}
         >
@@ -126,6 +138,7 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
       </div>
       <input
         ref={inputRef}
+        aria-label="Add photos"
         type="file"
         multiple
         accept={ACCEPT}
@@ -161,6 +174,6 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </div>
   );
 }
