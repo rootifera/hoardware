@@ -22,6 +22,9 @@ _photos_dir = Path(tempfile.mkdtemp(prefix="hoardware-test-photos-"))
 os.environ.update(
     DATABASE_URL=_test_url.render_as_string(hide_password=False),
     STORAGE_BACKEND="local",
+    # Tests run with login off whatever the real .env says; test_auth switches it on itself.
+    AUTH_PASSWORD="",
+    AUTH_PASSWORD_HASH="",
     PHOTOS_DIR=str(_photos_dir),
     MAX_UPLOAD_BYTES=str(1024 * 1024),
     MAX_FILE_BYTES=str(3 * 1024 * 1024),

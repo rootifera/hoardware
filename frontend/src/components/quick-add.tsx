@@ -189,12 +189,16 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // typed is looked up; elsewhere only something that looks like a chip code
   // (an S-Spec or ordering code) is, and only exact identifier matches count.
   // Nothing is ever filled in until the user picks a suggestion.
-  const categoryName = (categories.data ?? []).find((c) => String(c.id) === category)?.name ?? "";
+  const categoryOptions = (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }));
+  // Fall back to the first category when nothing (valid) is remembered: the id saved from an
+  // earlier session may no longer exist. Everything below must use this one, not the raw state.
+  const effectiveCategory = categoryOptions.some((o) => o.value === category) ? category : (categoryOptions[0]?.value ?? "");
+  const categoryName = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.name ?? "";
   // Which kind of reference record describes this category (CPUs, graphics cards).
   const refKind = refKindOf(categoryName);
   const sources = useQuery({ queryKey: ["reference-sources"], queryFn: api.referenceSources, staleTime: 60_000 });
   const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
-  const categoryFields = (categories.data ?? []).find((c) => String(c.id) === category)?.fields ?? [];
+  const categoryFields = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.fields ?? [];
   const hasChipsetField = categoryFields.some((f) => f.column === "chipset");
   // Everything else the category describes an item with; the chipset has its own field above.
   const specFields = categoryFields.filter((f) => f.column !== "chipset");
@@ -255,9 +259,6 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     }
   }
 
-  const categoryOptions = (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }));
-  // Fall back to the first category when nothing (valid) is remembered.
-  const effectiveCategory = categoryOptions.some((o) => o.value === category) ? category : (categoryOptions[0]?.value ?? "");
 
   async function save(mode: "close" | "edit" | "another") {
     if (saving) return;

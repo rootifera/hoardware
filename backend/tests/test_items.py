@@ -129,3 +129,15 @@ def test_database_session_uses_the_configured_timezone(db):
     from app.config import get_settings
 
     assert db.scalar(text("SHOW timezone")) == get_settings().tz
+
+
+def test_nul_characters_are_a_client_error_not_a_server_error(client, make_item, cats):
+    nul = "a\x00b"
+    assert client.get(f"{API}/items", params={"q": nul}).status_code == 422
+    assert client.get(f"{API}/manufacturers", params={"q": nul}).status_code == 422
+    assert client.get(f"{API}/reference-models", params={"q": nul}).status_code == 422
+    r = client.post(f"{API}/items", json={"category_id": cats["CPU"], "model": nul})
+    assert r.status_code == 422 and "NUL" in r.json()["detail"]
+    r = client.post(f"{API}/items", json={"category_id": cats["CPU"], "model": "x", "attributes": {"k": nul}})
+    assert r.status_code == 422
+    assert client.get(f"{API}/items").status_code == 200  # the session is still healthy afterwards

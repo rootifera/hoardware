@@ -928,3 +928,15 @@ test("RAM and storage fields offer predefined values, and a custom value still w
   await page.getByRole("button", { name: /Fields/ }).nth(4).click();
   await expect(page.getByRole("dialog").getByText(/Predefined values/).first()).toBeVisible();
 });
+
+test("Quick add still shows the category's fields when the remembered category no longer exists", async ({ page }) => {
+  // e.g. after the database was restored: the saved category id points at nothing.
+  await page.addInitScript(() => localStorage.setItem("hoardware.quickadd", JSON.stringify({ category: "999999" })));
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await expect(qa.getByLabel("Category")).toContainText("CPU");
+  await expect(qa.getByText("CPU specifications")).toBeVisible();
+  await expect(qa.getByLabel("Speed", { exact: true })).toBeVisible();
+});

@@ -1,6 +1,8 @@
 import logging
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError
 
 from app.auth import auth_enabled, require_auth
 from app.config import get_settings
@@ -26,3 +28,15 @@ app = FastAPI(
 
 for module in (auth_router, categories, locations, bulk, items, photos, files, reference, testlog, imports, misc):
     app.include_router(module.router, prefix=API_PREFIX)
+
+
+@app.exception_handler(DataError)
+def rejected_value(_: Request, exc: DataError) -> JSONResponse:
+    """A value the database cannot store (a NUL character, a number out of range) is the
+    client's mistake, not a server failure."""
+    log.warning("value rejected by the database: %s", str(exc.orig).splitlines()[0] if exc.orig else exc)
+    if "NUL" in str(exc.orig):
+        detail = "Text must not contain NUL (0x00) characters."
+    else:
+        detail = "A value is not acceptable (out of range or not storable)."
+    return JSONResponse({"detail": detail}, status_code=422)
