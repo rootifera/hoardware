@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { PhotoManager } from "@/components/photo-manager";
+import { ReferencePanel } from "@/components/reference-panel";
 import { SimpleSelect } from "@/components/simple-select";
 import { ConditionBadge, ConfidenceBadge, TestStatusBadge } from "@/components/status";
 import {
@@ -260,6 +261,7 @@ function ItemEditor({ item }: { item: Item }) {
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[1fr_22rem]">
+        <div className="grid min-w-0 content-start gap-8">
         <form
           className="grid gap-8"
           onSubmit={(e) => {
@@ -375,6 +377,8 @@ function ItemEditor({ item }: { item: Item }) {
             Save
           </button>
         </form>
+        <ReferencePanel item={item} locked={dirty} />
+        </div>
 
         <aside>
           <PhotoManager item={item} />

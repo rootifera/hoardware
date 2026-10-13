@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import categories, items, locations, misc, photos
+from app.routers import categories, items, locations, misc, photos, reference
 
 API_PREFIX = "/api/v1"
 
@@ -12,5 +12,5 @@ app = FastAPI(
     redoc_url=None,
 )
 
-for module in (categories, locations, items, photos, misc):
+for module in (categories, locations, items, photos, reference, misc):
     app.include_router(module.router, prefix=API_PREFIX)

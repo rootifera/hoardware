@@ -20,7 +20,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.enums import Condition, IdentificationConfidence, PhotoRole, TestStatus, sql_in
@@ -85,8 +85,7 @@ class Item(Base):
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="RESTRICT"))
     notes: Mapped[str | None] = mapped_column(Text)
     acquired_on: Mapped[date | None] = mapped_column(Date)
-    # FK to reference_models is added in Phase 2.
-    reference_model_id: Mapped[int | None] = mapped_column(BigInteger)
+    reference_model_id: Mapped[int | None] = mapped_column(ForeignKey("reference_models.id", ondelete="SET NULL"))
     identification_confidence: Mapped[str] = mapped_column(
         Text, server_default=IdentificationConfidence.UNIDENTIFIED.value
     )
@@ -149,3 +148,65 @@ class PendingDeletion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     attempts: Mapped[int] = mapped_column(Integer, server_default="0")
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class ReferenceSource(Base):
+    """A dataset that reference models are imported from (e.g. CPU-DB)."""
+
+    __tablename__ = "reference_sources"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    licence: Mapped[str | None] = mapped_column(Text)
+    attribution: Mapped[str | None] = mapped_column(Text)
+
+
+class ReferenceImport(Base):
+    """One run of an importer, with its report."""
+
+    __tablename__ = "reference_imports"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    source_key: Mapped[str] = mapped_column(ForeignKey("reference_sources.key"))
+    source_version: Mapped[str] = mapped_column(Text)
+    path: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added: Mapped[int] = mapped_column(Integer, server_default="0")
+    changed: Mapped[int] = mapped_column(Integer, server_default="0")
+    unchanged: Mapped[int] = mapped_column(Integer, server_default="0")
+    skipped: Mapped[int] = mapped_column(Integer, server_default="0")
+    errors: Mapped[int] = mapped_column(Integer, server_default="0")
+    report: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+
+class ReferenceModel(Base):
+    """A described hardware model (not a physical item). Imported, never
+    edited by hand; user overrides live on the inventory item."""
+
+    __tablename__ = "reference_models"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    source_key: Mapped[str] = mapped_column(ForeignKey("reference_sources.key"))
+    upstream_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)  # cpu, gpu_chipset, ...
+    manufacturer: Mapped[str | None] = mapped_column(Text)
+    family: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    part_number: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[str | None] = mapped_column(Text)
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    # Normalised (lowercase alphanumeric) identifiers for matching: whole part
+    # numbers / aliases, and the individual tokens inside them (e.g. S-Specs).
+    exact_keys: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    token_keys: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    specs: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    content_hash: Mapped[str] = mapped_column(Text)
+    source_version: Mapped[str] = mapped_column(Text)
+    import_id: Mapped[int] = mapped_column(ForeignKey("reference_imports.id"))
+    last_seen_import_id: Mapped[int] = mapped_column(ForeignKey("reference_imports.id"))
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    search_text: Mapped[str] = mapped_column(Text)
+    sort_name: Mapped[str] = mapped_column(Text)

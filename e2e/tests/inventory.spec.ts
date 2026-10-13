@@ -112,3 +112,40 @@ test("Attach a photo to an item", async ({ page, request }) => {
   await page.goto("/?q=" + encodeURIComponent(`photo card ${RUN}`));
   await expect(page.locator('img[src*="/thumbnail"]')).toBeVisible();
 });
+
+test("Reference matching is optional and stays out of the way", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const cpu = cats.find((c: { name: string }) => c.name === "CPU").id;
+  // Just a part number printed on the chip (a Pentium Pro S-Spec in CPU-DB).
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cpu, model: `Unknown CPU ${RUN}`, part_number: "SL23L" } })).json();
+  created.push(item.id);
+
+  await page.goto(`/items/${item.id}`);
+  // Quiet by default: one line, no suggestions fetched or shown.
+  await expect(page.getByText("Not matched to a reference model (optional).")).toBeVisible();
+  await expect(page.getByText("Suggested matches")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Find reference match" }).click();
+  await expect(page.getByText("Shares a code: sl23l")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm match" }).first().click();
+  await expect(page.getByText("Match confirmed").first()).toBeVisible();
+  await expect(page.getByText("Imported specs from CPU-DB")).toBeVisible();
+  // The item's own fields are untouched.
+  await expect(page.getByLabel("Model / description")).toHaveValue(`Unknown CPU ${RUN}`);
+  await page.screenshot({ path: "test-results/ref-linked.png", fullPage: true });
+
+  // Unsaved edits lock the match buttons so a link can't wipe them.
+  await page.getByLabel("Notes").first().fill("typing…");
+  await expect(page.getByText("You have unsaved changes.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Unlink" })).toBeDisabled();
+  await page.getByRole("button", { name: "Revert" }).click();
+
+  await page.getByRole("button", { name: "Unlink" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Unlink" }).click();
+  await expect(page.getByText("Not matched to a reference model (optional).")).toBeVisible();
+  const after = await (await request.get(`/api/v1/items/${item.id}`)).json();
+  expect(after.identification_confidence).toBe("unidentified");
+});

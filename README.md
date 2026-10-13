@@ -117,6 +117,21 @@ docker run --rm -v hoardware_backups:/b -v "$PWD":/out busybox cp -a /b/. /out/
 
 Volume names are prefixed with the Compose project name (`hoardware_` by default).
 
+## Reference data (optional)
+
+Hoardware works fully without this. If you want, an item can be matched to a described model (specs from a public dataset) so you don't have to type them in. Matching never changes your own fields, never links automatically, and can be undone with **Unlink**.
+
+CPU-DB (<https://github.com/zymos/cpu-db>) is supported. Put a checkout (or just the `cpu-db.<Vendor>.csv` files) in `./reference-data/cpu-db/` (git-ignored; mounted read-only into the backend at `/reference-data`), then:
+
+```bash
+docker compose run --rm --no-deps backend python -m app.cli import-reference cpu-db /reference-data/cpu-db --dry-run   # report only
+docker compose run --rm --no-deps backend python -m app.cli import-reference cpu-db /reference-data/cpu-db
+```
+
+The import is repeatable: re-running reports `added / changed / unchanged / skipped / errors`, updates records in place (so existing links survive) and never deletes records. Findings about the dataset's quirks, and why the GPU datasets are not imported, are in [docs/reference-data-findings.md](docs/reference-data-findings.md).
+
+On an item page, **Find reference match** suggests models by part number (including codes such as an S-Spec) and name; you choose **Confirm match** or **Mark as candidate**.
+
 ## Development
 
 ```bash

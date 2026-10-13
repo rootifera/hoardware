@@ -56,7 +56,7 @@ SEED = ["CPU", "GPU/VGA", "Motherboard", "Sound Card", "RAM", "Storage", "Other"
 @pytest.fixture(autouse=True)
 def clean_state():
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE items, photos, locations, categories, pending_deletions RESTART IDENTITY CASCADE"))
+        conn.execute(text("TRUNCATE items, photos, locations, categories, pending_deletions, reference_models, reference_imports, reference_sources RESTART IDENTITY CASCADE"))
         conn.execute(text("ALTER SEQUENCE inventory_code_seq RESTART"))
         for i, name in enumerate(SEED):
             conn.execute(text("INSERT INTO categories (name, sort_order) VALUES (:n, :o)"), {"n": name, "o": i * 10})

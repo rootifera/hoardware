@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Annotated, Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
@@ -131,11 +131,63 @@ class ItemSummary(BaseModel):
     updated_at: datetime
 
 
+class ReferenceSourceOut(BaseModel):
+    key: str
+    name: str
+    url: str | None
+    licence: str | None
+    attribution: str | None
+
+
+class ReferenceSummary(BaseModel):
+    id: int
+    kind: str
+    manufacturer: str | None
+    family: str | None
+    model: str
+    part_number: str | None
+    revision: str | None
+    source_key: str
+    highlights: dict[str, Any]
+
+
+class ReferenceDetail(ReferenceSummary):
+    aliases: list[str]
+    specs: dict[str, Any]
+    provenance: dict[str, Any]
+    source: ReferenceSourceOut
+    source_version: str
+    imported_at: datetime
+
+
+class ReferenceCandidate(BaseModel):
+    reference: ReferenceSummary
+    # exact: the part number equals the model's part number or an alias.
+    # token: shares an identifier (e.g. the S-Spec) with it.
+    # text: only the name/words look alike. Always a candidate, never a fact.
+    match_type: Literal["exact", "token", "text"]
+    matched_on: list[str]
+    manufacturer_matches: bool | None
+
+
+class ReferenceSourceStatus(ReferenceSourceOut):
+    models: int
+    source_version: str | None
+    last_import_at: datetime | None
+
+
+class ReferenceMatchIn(BaseModel):
+    reference_model_id: int
+    # "candidate" = looks right but not verified; "confirmed" = the user checked.
+    confidence: Literal["candidate", "confirmed"] = "confirmed"
+
+
 class ItemDetail(ItemSummary):
     test_notes: str | None
     notes: str | None
     acquired_on: date | None
     reference_model_id: int | None
+    reference: ReferenceDetail | None = None
     attributes: dict[str, Any]
     photos: list[PhotoOut]
 

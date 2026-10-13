@@ -219,3 +219,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 HOARDWARE_SPEC.md
+# Reference datasets supplied by the user (see README)
+/reference-data/*
+!/reference-data/.gitkeep
+
+# The Python template above ignores every lib/ directory; the frontend's source lives in one.
+!/frontend/src/lib/

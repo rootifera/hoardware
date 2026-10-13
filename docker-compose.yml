@@ -50,6 +50,8 @@ services:
     volumes:
       - photos:/data/photos
       - backups:/backups
+      # Dataset files for `import-reference` (e.g. a CPU-DB checkout). Never committed.
+      - ${REFERENCE_DATA_DIR:-./reference-data}:/reference-data:ro
     depends_on:
       db:
         condition: service_healthy

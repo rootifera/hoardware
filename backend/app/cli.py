@@ -1,9 +1,11 @@
 """Management commands: ``python -m app.cli <command>``."""
 
 import argparse
+import json
 import logging
 import sys
 import time
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -11,6 +13,8 @@ from app.backup import create_backup, list_backups, restore_backup
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Photo
+from app.reference.registry import ADAPTERS
+from app.reference.runner import ImportReport, run_import
 from app.services.photos import process_pending_deletions
 from app.storage import ObjectNotFound, StorageError, build_storage, get_storage
 
@@ -84,6 +88,27 @@ def cmd_migrate_photos(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_import_reference(args: argparse.Namespace) -> int:
+    adapter = ADAPTERS[args.source]()
+    path = Path(args.path)
+    if not path.exists():
+        print(f"error: {path} does not exist", file=sys.stderr)
+        return 1
+
+    def progress(report: ImportReport) -> None:
+        print(f"  ... added {report.added}, changed {report.changed}, unchanged {report.unchanged}", flush=True)
+
+    with SessionLocal() as session:
+        report = run_import(session, adapter, path, dry_run=args.dry_run, progress=progress)
+    print(("DRY RUN (nothing saved): " if report.dry_run else "") + json.dumps(report.summary(), indent=2))
+    for issue in report.issues[: args.show_issues]:
+        print(f"  [{issue['level']}] {issue['where']}: {issue['message']}")
+    hidden = len(report.issues) - args.show_issues
+    if hidden > 0:
+        print(f"  ... {hidden} more issue(s) are stored with the import record")
+    return 1 if report.errors and not report.added + report.changed + report.unchanged else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="python -m app.cli")
@@ -105,6 +130,13 @@ def main(argv: list[str] | None = None) -> int:
     migrate.add_argument("--to", dest="target", choices=["local", "s3"], required=True)
     migrate.add_argument("--delete-source", action="store_true", help="remove each object from the source after copying")
     migrate.set_defaults(func=cmd_migrate_photos)
+
+    imp = sub.add_parser("import-reference", help="import a reference hardware dataset from local files")
+    imp.add_argument("source", choices=sorted(ADAPTERS))
+    imp.add_argument("path", help="file or directory containing the dataset (inside the container)")
+    imp.add_argument("--dry-run", action="store_true", help="parse and report, but save nothing")
+    imp.add_argument("--show-issues", type=int, default=20, help="how many errors/skips to print")
+    imp.set_defaults(func=cmd_import_reference)
 
     args = parser.parse_args(argv)
     try:

@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.enums import Condition, IdentificationConfidence, TestStatus
-from app.models import Category, Item, Location, Photo
+from app.models import Category, Item, Location, Photo, ReferenceModel
 from app.pagination import apply_keyset, encode_cursor, decode_cursor
 from app.schemas import ItemCreate, ItemDetail, ItemSummary, ItemUpdate, Page, PhotoOut
 from app.services import items as item_service
+from app.services import reference as reference_service
 from app.services.items import ItemFilters
 from app.services.photos import process_pending_deletions, queue_deletions
 from app.storage import StorageError, get_storage
@@ -128,9 +129,13 @@ def load_detail(session: Session, item_id: int) -> ItemDetail:
     photos = session.scalars(
         select(Photo).where(Photo.item_id == item_id).order_by(Photo.sort_order, Photo.id)
     ).all()
-    fields = {name: getattr(row, name) for name in ItemDetail.model_fields if name not in ("thumbnail_url", "photos")}
+    fields = {
+        name: getattr(row, name) for name in ItemDetail.model_fields if name not in ("thumbnail_url", "photos", "reference")
+    }
+    reference = session.get(ReferenceModel, row.reference_model_id) if row.reference_model_id else None
     return ItemDetail(
         **fields,
+        reference=reference_service.detail_of(session, reference) if reference else None,
         thumbnail_url=thumbnail_url(photos[0].id) if photos else None,
         photos=[photo_out(p) for p in photos],
     )
