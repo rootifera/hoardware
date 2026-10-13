@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { Category, CategoryField } from "@/lib/types";
 
@@ -81,17 +82,39 @@ function FieldsForm({ category, onClose }: { category: Category; onClose: () => 
               <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${f.name || "field"}`} onClick={() => setFields(fields.filter((_, idx) => idx !== i))}>
                 <Trash2 />
               </Button>
+              <details className="col-start-2 col-end-5 text-sm">
+                <summary className="cursor-pointer text-muted-foreground">
+                  Predefined values{f.options.length ? ` (${f.options.length})` : ""}
+                </summary>
+                <Textarea
+                  key={`${i}:${f.name}`}
+                  aria-label={`Predefined values for ${f.name || "field"}`}
+                  className="mt-1.5 font-mono text-xs"
+                  rows={Math.min(8, Math.max(3, f.options.length + 1))}
+                  placeholder={"One per line, e.g.\nSDRAM\nEDO"}
+                  defaultValue={f.options.join("\n")}
+                  onBlur={(e) => {
+                    const seen = new Set<string>();
+                    const options = e.target.value
+                      .split("\n")
+                      .map((o) => o.trim())
+                      .filter((o) => o && !seen.has(o.toLowerCase()) && seen.add(o.toLowerCase()));
+                    update(i, { options });
+                  }}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">Offered as a list when filling the field in. Other values can always be typed.</p>
+              </details>
             </li>
           ))}
         </ol>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => setFields([...fields, { name: "", hint: "", column: null }])}>
+        <Button type="button" variant="outline" size="sm" onClick={() => setFields([...fields, { name: "", hint: "", column: null, options: [] }])}>
           <Plus /> Add field
         </Button>
         {missingColumns.map((c) => (
-          <Button key={c.column} type="button" variant="ghost" size="sm" onClick={() => setFields([...fields, { name: c.name, hint: c.hint, column: c.column }])}>
+          <Button key={c.column} type="button" variant="ghost" size="sm" onClick={() => setFields([...fields, { name: c.name, hint: c.hint, column: c.column, options: [] }])}>
             <Plus /> {c.name}
           </Button>
         ))}

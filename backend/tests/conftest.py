@@ -72,6 +72,11 @@ _seed_fields11 = importlib.util.module_from_spec(_spec11)
 _spec11.loader.exec_module(_seed_fields11)
 DEFAULT_FIELDS["gpu/vga"] = list(_seed_fields11.NEW)
 
+_spec12 = importlib.util.spec_from_file_location("seed_fields12", Path(__file__).resolve().parent.parent / "alembic/versions/0012_field_options.py")
+_seed_fields12 = importlib.util.module_from_spec(_spec12)
+_spec12.loader.exec_module(_seed_fields12)
+DEFAULT_FIELDS = {name: _seed_fields12.with_options(name, fields) for name, fields in DEFAULT_FIELDS.items()}
+
 
 @pytest.fixture(autouse=True)
 def clean_state():

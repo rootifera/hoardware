@@ -80,9 +80,9 @@ def test_editing_a_categorys_fields(client, cats):
     r = client.patch(f"{API}/categories/{cats['Other']}", json={"fields": fields})
     assert r.status_code == 200
     assert r.json()["fields"] == [
-        {"name": "Socket", "hint": "e.g. Socket 7", "column": None},
-        {"name": "Clock", "hint": "", "column": None},
-        {"name": "Chipset", "hint": "", "column": "chipset"},
+        {"name": "Socket", "hint": "e.g. Socket 7", "column": None, "options": []},
+        {"name": "Clock", "hint": "", "column": None, "options": []},
+        {"name": "Chipset", "hint": "", "column": "chipset", "options": []},
     ]
     assert client.patch(f"{API}/categories/{cats['Other']}", json={"name": "Misc"}).json()["fields"][0]["name"] == "Socket"  # other edits keep them
     created = client.post(f"{API}/categories", json={"name": "Network Card", "fields": [{"name": "Speed"}]})

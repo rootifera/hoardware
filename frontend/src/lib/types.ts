@@ -34,6 +34,8 @@ export interface CategoryField {
   hint: string;
   /** Stored in this item column instead of the item's own specs. */
   column: "chipset_manufacturer" | "chipset" | "revision" | null;
+  /** Predefined values offered for the field; any other value can still be typed. */
+  options: string[];
 }
 
 export interface Category {

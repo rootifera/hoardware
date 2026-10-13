@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { FileManager } from "@/components/file-manager";
+import { OptionInput } from "@/components/option-input";
 import { PhotoManager } from "@/components/photo-manager";
 import { useQuickAdd } from "@/components/quick-add";
 import { ReferencePanel } from "@/components/reference-panel";
@@ -426,6 +427,14 @@ function ItemEditor({ item }: { item: Item }) {
                             placeholder={f.hint}
                             value={columnValue(f.column)}
                             onChange={(e) => set(f.column!, e.target.value)}
+                          />
+                        ) : f.options.length > 0 ? (
+                          <OptionInput
+                            id={inputId}
+                            placeholder={f.hint}
+                            options={f.options}
+                            value={specValue(f.name)}
+                            onChange={(v) => setSpec(f.name, v)}
                           />
                         ) : (
                           <Input

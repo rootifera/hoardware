@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
+import { OptionInput } from "@/components/option-input";
 import { SimpleSelect } from "@/components/simple-select";
 import { Button } from "@/components/ui/button";
 import {
@@ -503,14 +504,24 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
                 <Label htmlFor={`qa-spec-${i}`} className="text-xs text-muted-foreground">
                   {f.name}
                 </Label>
-                <Input
-                  id={`qa-spec-${i}`}
-                  autoComplete="off"
-                  className="h-8"
-                  placeholder={f.hint}
-                  value={specs[specKey(f)] ?? ""}
-                  onChange={(e) => setSpecs((cur) => ({ ...cur, [specKey(f)]: e.target.value }))}
-                />
+                {f.options.length > 0 ? (
+                  <OptionInput
+                    id={`qa-spec-${i}`}
+                    placeholder={f.hint}
+                    options={f.options}
+                    value={specs[specKey(f)] ?? ""}
+                    onChange={(v) => setSpecs((cur) => ({ ...cur, [specKey(f)]: v }))}
+                  />
+                ) : (
+                  <Input
+                    id={`qa-spec-${i}`}
+                    autoComplete="off"
+                    className="h-8"
+                    placeholder={f.hint}
+                    value={specs[specKey(f)] ?? ""}
+                    onChange={(e) => setSpecs((cur) => ({ ...cur, [specKey(f)]: e.target.value }))}
+                  />
+                )}
               </div>
             ))}
           </div>

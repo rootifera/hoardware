@@ -42,6 +42,8 @@ class CategoryField(BaseModel):
     hint: Annotated[str, BeforeValidator(_strip), Field(max_length=120)] = ""
     # Stored in this item column instead of the item's specs.
     column: Literal["chipset_manufacturer", "chipset", "revision"] | None = None
+    # Predefined values offered when filling the field in; any other value can still be typed.
+    options: list[Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=80)]] = Field(default_factory=list)
 
 
 def _check_fields(fields: list[CategoryField]) -> list[CategoryField]:
@@ -53,6 +55,10 @@ def _check_fields(fields: list[CategoryField]) -> list[CategoryField]:
         if f.name.lower() in seen:
             raise ValueError(f"field “{f.name}” is listed twice")
         seen.add(f.name.lower())
+        if len(f.options) > 60:
+            raise ValueError(f"field “{f.name}” has more than 60 options")
+        if len({o.lower() for o in f.options}) != len(f.options):
+            raise ValueError(f"field “{f.name}” lists an option twice")
         if f.column:
             if f.column in columns:
                 raise ValueError(f"more than one field uses the {f.column} column")

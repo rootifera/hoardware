@@ -686,6 +686,7 @@ test("Each category has its own fields: a CPU is set up as a CPU, a graphics car
   // Fill a spec, save, and it is searchable and shown on the inventory row.
   await page.getByLabel("Speed", { exact: true }).fill("233MHz");
   await page.getByLabel("Socket", { exact: true }).fill("Socket 7");
+  await page.keyboard.press("Escape"); // the list of predefined sockets closes; the typed value stays
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect((await (await request.get(`/api/v1/items/${cpu.id}`)).json()).attributes).toEqual({ Speed: "233MHz", Socket: "Socket 7" });
@@ -697,6 +698,7 @@ test("Each category has its own fields: a CPU is set up as a CPU, a graphics car
   await page.getByLabel("Chipset maker").fill("NVIDIA");
   await page.getByLabel("Chipset", { exact: true }).fill("RIVA TNT2 Ultra");
   await page.getByLabel("Memory size").fill("32MB");
+  await page.keyboard.press("Escape"); // closes the list of predefined sizes
   await expect(page.getByLabel("Speed", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
@@ -881,4 +883,48 @@ test("Quick add takes a RAM or storage item's specifications in one go", async (
   await page.getByRole("button", { name: "More actions" }).click();
   await page.getByRole("menuitem", { name: "Add another like this" }).click();
   await expect(page.getByRole("dialog").getByLabel("Capacity", { exact: true })).toHaveValue("128MB");
+});
+
+test("RAM and storage fields offer predefined values, and a custom value still works", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "RAM", exact: true }).click();
+  await qa.getByLabel("Model / description").fill(`Option stick ${RUN}`);
+
+  // Pick from the list...
+  await qa.getByLabel("Type", { exact: true }).click();
+  await expect(page.getByRole("option", { name: "EDO", exact: true })).toBeVisible();
+  await page.getByRole("option", { name: "EDO", exact: true }).click();
+  await expect(qa.getByLabel("Type", { exact: true })).toHaveValue("EDO");
+  // ...type to narrow it, then pick...
+  await qa.getByLabel("Capacity", { exact: true }).fill("12");
+  await expect(page.getByRole("option", { name: "128MB", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "4MB", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "128MB", exact: true }).click();
+  await expect(qa.getByLabel("Capacity", { exact: true })).toHaveValue("128MB");
+  // ...or ignore the list and use a value of your own.
+  await qa.getByLabel("Speed", { exact: true }).fill("PC-weird 77");
+  await qa.getByLabel("Pins", { exact: true }).click();
+  await page.keyboard.press("Escape"); // closes the list only
+  await expect(qa).toBeVisible();
+  await qa.getByLabel("Model / description").click();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+
+  const newest = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Option stick ${RUN}`)}&limit=1`)).json()).items[0];
+  created.push(newest.id);
+  const detail = await (await request.get(`/api/v1/items/${newest.id}`)).json();
+  expect(detail.attributes).toMatchObject({ Type: "EDO", Capacity: "128MB", Speed: "PC-weird 77" });
+
+  // The item page offers the same values, and the options are editable on the Categories page.
+  await page.goto(`/items/${newest.id}`);
+  await page.getByLabel("ECC", { exact: true }).click();
+  await page.getByRole("option", { name: "Parity", exact: true }).click();
+  await expect(page.getByLabel("ECC", { exact: true })).toHaveValue("Parity");
+  await page.goto("/categories");
+  await page.getByRole("button", { name: /Fields/ }).nth(4).click();
+  await expect(page.getByRole("dialog").getByText(/Predefined values/).first()).toBeVisible();
 });
