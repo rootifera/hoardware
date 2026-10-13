@@ -139,6 +139,27 @@ def cmd_relayout_storage(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_hash_password(args: argparse.Namespace) -> int:
+    import getpass
+
+    from app.auth import hash_password
+
+    if args.password_stdin:  # for scripts (deploy.sh): the password is the first line of stdin
+        first = sys.stdin.readline().rstrip("\r\n")
+        if not first:
+            print("empty password", file=sys.stderr)
+            return 1
+        print(f"AUTH_PASSWORD_HASH={hash_password(first)}")
+        return 0
+    first = getpass.getpass("Password: ")
+    if not first or first != getpass.getpass("Again: "):
+        print("passwords empty or different", file=sys.stderr)
+        return 1
+    print("Put this line in .env:")
+    print(f"AUTH_PASSWORD_HASH={hash_password(first)}")
+    return 0
+
+
 def cmd_import_reference(args: argparse.Namespace) -> int:
     adapter = ADAPTERS[args.source]()
     path = Path(args.path)
@@ -181,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     migrate.add_argument("--to", dest="target", choices=["local", "s3"], required=True)
     migrate.add_argument("--delete-source", action="store_true", help="remove each object from the source after copying")
     migrate.set_defaults(func=cmd_migrate_photos)
+
+    hp = sub.add_parser("hash-password", help="make an AUTH_PASSWORD_HASH for .env")
+    hp.add_argument("--password-stdin", action="store_true", help="read the password from the first line of stdin")
+    hp.set_defaults(func=cmd_hash_password)
 
     relayout = sub.add_parser("relayout-storage", help="move stored photos and files to the current key layout")
     relayout.add_argument("--from-prefix", help="the S3 prefix the objects are in now (e.g. photos/)")

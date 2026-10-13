@@ -11,6 +11,15 @@ class Settings(BaseSettings):
     # IANA timezone used for "today" (verified/tested dates). Set TZ in .env.
     tz: str = "UTC"
 
+    # Single-user login. Empty AUTH_PASSWORD (and AUTH_PASSWORD_HASH) = no login required.
+    # AUTH_PASSWORD_HASH (from `python -m app.cli hash-password`) is preferred over a plain password.
+    auth_username: str = "admin"
+    auth_password: str | None = None
+    auth_password_hash: str | None = None
+    auth_session_days: int = 30
+    # auto: Secure cookie when the request came in over https (X-Forwarded-Proto), else not.
+    auth_cookie_secure: Literal["auto", "always", "never"] = "auto"
+
     database_url: str = "postgresql+psycopg://hoardware:hoardware@db:5432/hoardware"
 
     # Photos

@@ -31,6 +31,13 @@ import type {
 // Everything goes through the Next.js proxy; the backend is never contacted
 // directly from the browser.
 const BASE = "/api/v1";
+export const UNAUTHORIZED_EVENT = "hoardware:unauthorized";
+
+export interface AuthStatus {
+  auth_required: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -67,6 +74,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message = describe((await response.json()).detail);
     } catch {
       /* non-JSON error body */
+    }
+    // The session ended (or login was switched on): let the app show the sign-in form.
+    if (response.status === 401 && !path.startsWith("/auth/") && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
     throw new ApiError(response.status, message);
   }
@@ -167,6 +178,10 @@ export const api = {
     request<Photo>(`/items/${itemId}/photos/${photoId}`, json("PATCH", body)),
   deletePhoto: (itemId: number, photoId: number) =>
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
+
+  authStatus: () => request<AuthStatus>("/auth/status"),
+  login: (username: string, password: string) => request<AuthStatus>("/auth/login", json("POST", { username, password })),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   uploadFiles: (itemId: number, files: File[], kind: FileKind = "other") => {
     const form = new FormData();

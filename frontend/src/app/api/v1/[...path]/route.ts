@@ -3,7 +3,17 @@
 
 export const dynamic = "force-dynamic";
 
-const REQUEST_HEADERS = ["content-type", "content-length", "accept", "if-none-match", "range"];
+const REQUEST_HEADERS = [
+  "content-type",
+  "content-length",
+  "accept",
+  "if-none-match",
+  "range",
+  "cookie",
+  // So the backend knows the original scheme (Secure cookies) and client.
+  "x-forwarded-proto",
+  "x-forwarded-for",
+];
 const RESPONSE_HEADERS = [
   "content-type",
   "content-length",
@@ -47,6 +57,8 @@ async function proxy(request: Request, ctx: { params: Promise<{ path: string[] }
     const value = upstream.headers.get(name);
     if (value) out.set(name, value);
   }
+  // Session cookies set (or cleared) by the backend's login endpoints.
+  for (const cookie of upstream.headers.getSetCookie()) out.append("set-cookie", cookie);
   return new Response(upstream.status === 204 || upstream.status === 304 ? null : upstream.body, {
     status: upstream.status,
     headers: out,

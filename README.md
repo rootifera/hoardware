@@ -14,6 +14,10 @@ Only the frontend publishes a port. The backend API and database exist solely on
 
 ## Quick start
 
+On a server, `./deploy.sh` does everything: it pulls the latest code, builds the containers, creates `.env` if there is none, and starts the application. The first time it asks for the timezone, the port, the sign-in username and password (stored only as a hash), optionally your S3 details (checked before it carries on) and whether to take daily backups; the database password is generated. Later runs just update and restart. `./deploy.sh --no-cache` rebuilds the images from scratch. An existing `.env` is never touched.
+
+By hand:
+
 ```bash
 cp .env.example .env     # optional; every value has a working default
 docker compose up -d --build
@@ -46,6 +50,23 @@ Everyday use needs no internet access. (Building the images does.)
 - **Stock-take**: each item records when it was last *verified* (seen in place). Tick what is physically there and press **Verified** in the bulk bar, then use the *Last verified* filter (or the *Stock-take* filter on a location's page) to list what has not been seen in 30/90/365 days, or never. **Print list** on a location's page gives a printable, position-ordered sheet with a tick box per item, grouped by sub-location, for checking on paper.
 - **Bulk actions**: tick rows (shift-click selects a range, or *Select all N matching* for everything the filters match) and a bar appears: set the test status, condition, category or test notes, or **Move…** to a location. When moving you choose what happens to positions: clear them, number on after the last one in the destination, or keep them (refused if any would clash, with a count shown before you commit). On a location's page, **Move all items…** moves everything out of it.
 - **CSV export and import**: the **CSV** button exports the current filter (streamed, so it works at any size). **Import** takes a CSV (the export's columns, a template is provided, and friendly header names such as `name`, `p/n` work too), checks every row first and shows the problems by line, and writes nothing until you confirm. It is all-or-nothing unless you tick *Skip rows with errors*; *Create missing categories/locations* fill in what the file refers to. Every row becomes a new item with a new code.
+
+## Login and running behind a reverse proxy
+
+Hoardware has a single-user login. Set a password in `.env` and it is required for everything (the pages, the API, photos and downloads); without one the app is open, and the backend logs a warning at start.
+
+```bash
+docker compose run --rm --no-deps backend python -m app.cli hash-password   # prints AUTH_PASSWORD_HASH=...
+# put that line (and AUTH_USERNAME, default "admin") in .env, then: docker compose up -d
+```
+
+`AUTH_PASSWORD` (plain text) also works if you prefer. The session is a signed, HttpOnly, SameSite=Lax cookie valid for `AUTH_SESSION_DAYS` (30); changing the password signs everyone out. Eight wrong attempts in ten minutes lock sign-in for a while. The interactive API docs are switched off while login is on. `/api/v1/health` stays open for health checks.
+
+**TLS and the proxy** are yours to provide (for example BunkerWeb). Point it at the frontend service (`http://frontend:3000` on the same Docker network, or `http://<host>:3100` via `FRONTEND_PORT`) and never at the backend, which is not published. The cookie is marked `Secure` when the proxy sends `X-Forwarded-Proto: https` (most do). Check these on the proxy:
+
+- the upload limit: photos are up to `MAX_UPLOAD_BYTES` (20 MB) and downloads up to `MAX_FILE_BYTES` (250 MB), so the proxy's maximum request body (BunkerWeb: `MAX_CLIENT_SIZE`) has to allow that, or large files fail with a 413 before reaching the app;
+- websockets are not used, and no special timeouts are needed beyond the usual for large uploads;
+- set a real `POSTGRES_PASSWORD` in `.env` before the first start (the database is only reachable inside the Compose network, but there is no reason to keep the default).
 
 ## Photo and file storage
 

@@ -1,13 +1,16 @@
 "use client";
 
-import { Cpu, Keyboard, Moon, Plus, Sun } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Cpu, Keyboard, LogOut, Moon, Plus, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { AUTH_KEY } from "@/components/auth-gate";
 import { useQuickAdd } from "@/components/quick-add";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -33,6 +36,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { open } = useQuickAdd();
   const { resolvedTheme, setTheme } = useTheme();
   const [help, setHelp] = useState(false);
+  const queryClient = useQueryClient();
+  const auth = useQuery({ queryKey: AUTH_KEY, queryFn: api.authStatus, staleTime: 60_000 });
+  async function signOut() {
+    await api.logout().catch(() => {});
+    queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== AUTH_KEY[0] });
+    await queryClient.invalidateQueries({ queryKey: AUTH_KEY });
+  }
 
   // "?" shows the shortcut list.
   useEffect(() => {
@@ -104,6 +114,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Sun className="dark:hidden" />
               <Moon className="hidden dark:block" />
             </Button>
+            {auth.data?.auth_required && (
+              <Button variant="ghost" size="icon" aria-label="Sign out" title={`Sign out${auth.data.username ? ` (${auth.data.username})` : ""}`} onClick={() => void signOut()}>
+                <LogOut />
+              </Button>
+            )}
           </div>
         </div>
       </header>
