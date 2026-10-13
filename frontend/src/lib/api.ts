@@ -196,6 +196,8 @@ export const api = {
   referenceSources: () => request<ReferenceSourceStatus[]>("/reference-sources"),
   referenceSuggestions: (q: string, kind?: string | null) =>
     request<ReferenceCandidate[]>(`/reference-suggestions?${new URLSearchParams({ q, limit: "6", ...(kind ? { kind } : {}) })}`),
+  referenceSnapshot: (id: number) =>
+    request<{ specs: Record<string, string>; columns: Record<string, string> }>(`/reference-models/${id}/snapshot`),
   referenceCandidates: (itemId: number) => request<ReferenceCandidate[]>(`/items/${itemId}/reference-candidates`),
   searchReference: (q: string, cursor?: string | null) => {
     const p = new URLSearchParams({ limit: "20" });

@@ -33,7 +33,7 @@ test("Quick Add with the keyboard, then find the part by search", async ({ page,
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Model / description").fill(model);
-  await dialog.getByLabel("Model / description").press("Enter");
+  await dialog.getByRole("button", { name: "Save & add another" }).click();
 
   // Saved, and the form stays open for the next part.
   await expect(page.getByText(/Added\s+HW-\d+/)).toBeVisible();
@@ -851,4 +851,34 @@ test("Quick add: manufacturer and model sit side by side, and Save & edit opens 
   await expect(page).toHaveURL(/\/items\/\d+$/);
   await expect(page.getByLabel("Model / description")).toHaveValue(`Edit me ${RUN}`);
   created.push(Number(page.url().split("/").pop()));
+});
+
+test("Quick add takes a RAM or storage item's specifications in one go", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "RAM", exact: true }).click();
+  await expect(qa.getByText("RAM specifications")).toBeVisible();
+  await qa.getByLabel("Model / description").fill(`Kingston stick ${RUN}`);
+  await qa.getByLabel("Type", { exact: true }).fill("SDRAM");
+  await qa.getByLabel("Capacity", { exact: true }).fill("128MB");
+  await qa.getByLabel("Speed", { exact: true }).fill("PC133");
+
+  // Enter saves (and closes), like the Save button.
+  await qa.getByLabel("Model / description").press("Enter");
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+  await expect(qa).toHaveCount(0);
+
+  const newest = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Kingston stick ${RUN}`)}&limit=1`)).json()).items[0];
+  created.push(newest.id);
+  const detail = await (await request.get(`/api/v1/items/${newest.id}`)).json();
+  expect(detail.attributes).toMatchObject({ Type: "SDRAM", Capacity: "128MB", Speed: "PC133" });
+
+  // "Add another like this" carries the specs into the form.
+  await page.goto(`/items/${newest.id}`);
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Add another like this" }).click();
+  await expect(page.getByRole("dialog").getByLabel("Capacity", { exact: true })).toHaveValue("128MB");
 });

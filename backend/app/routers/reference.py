@@ -72,6 +72,16 @@ def get_reference_model(reference_id: int, session: SessionDep):
     return service.detail_of(session, ref)
 
 
+@router.get("/reference-models/{reference_id}/snapshot")
+def reference_snapshot(reference_id: int, session: SessionDep):
+    """What matching this record writes onto an item: its specs under plain names and
+    the item columns it fills. The Quick add form shows these before saving."""
+    ref = session.get(ReferenceModel, reference_id)
+    if ref is None:
+        raise HTTPException(404, "reference model not found")
+    return {"specs": service.spec_snapshot(ref), "columns": service.column_values(ref)}
+
+
 @router.get("/reference-suggestions", response_model=list[ReferenceCandidate])
 def reference_suggestions(
     session: SessionDep,

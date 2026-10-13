@@ -345,6 +345,12 @@ function ItemEditor({ item }: { item: Item }) {
                       model: item.model,
                       manufacturer: item.manufacturer ?? "",
                       partNumber: item.part_number ?? "",
+                      chipset: item.chipset ?? "",
+                      specs: {
+                        ...Object.fromEntries(Object.entries(item.attributes).map(([k, v]) => [k, asText(v)])),
+                        ...(item.chipset_manufacturer ? { "col:chipset_manufacturer": item.chipset_manufacturer } : {}),
+                        ...(item.revision ? { "col:revision": item.revision } : {}),
+                      },
                       location: item.location_id != null ? { id: item.location_id, full_name: item.location_path ?? "" } : undefined,
                     })
                   }

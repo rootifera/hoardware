@@ -32,7 +32,7 @@ Everyday use needs no internet access. (Building the images does.)
 | Key | Action                                            |
 | --- | ------------------------------------------------- |
 | `/` | Focus search                                      |
-| `n` | Quick add (Enter = save and add another)          |
+| `n` | Quick add (Enter = Save)                          |
 | `Ctrl/⌘ + S` | Save on the item page                    |
 
 ## Using it

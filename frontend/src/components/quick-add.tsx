@@ -39,6 +39,9 @@ export interface QuickAddPreset {
   model?: string;
   manufacturer?: string;
   partNumber?: string;
+  /** The item's own specs, by field name. */
+  specs?: Record<string, string>;
+  chipset?: string;
 }
 
 interface QuickAddContext {
@@ -116,7 +119,7 @@ function QuickAddDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Quick add</DialogTitle>
           <DialogDescription>
@@ -143,7 +146,12 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const [manufacturer, setManufacturer] = useState(preset?.manufacturer ?? "");
   const [partNumber, setPartNumber] = useState(preset?.partNumber ?? "");
   // The chip on a card or board (graphics, sound, motherboard): not the same thing as the card itself.
-  const [chipset, setChipset] = useState("");
+  const [chipset, setChipset] = useState(preset?.chipset ?? "");
+  // The category's own fields (capacity, speed, interface…): by lower-cased field name, and
+  // "col:<column>" for the fields kept in item columns (chipset maker, revision).
+  const [specs, setSpecs] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(preset?.specs ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
+  );
   const [condition, setCondition] = useState<Condition>("Unknown");
   const [testStatus, setTestStatus] = useState<TestStatus>("Untested");
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
@@ -187,6 +195,9 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
   const categoryFields = (categories.data ?? []).find((c) => String(c.id) === category)?.fields ?? [];
   const hasChipsetField = categoryFields.some((f) => f.column === "chipset");
+  // Everything else the category describes an item with; the chipset has its own field above.
+  const specFields = categoryFields.filter((f) => f.column !== "chipset");
+  const specKey = (f: { name: string; column: string | null }) => (f.column ? `col:${f.column}` : f.name.toLowerCase());
   // A graphics card is the board (maker + model, e.g. Diamond Viper V770 Ultra); the dataset
   // describes its chip (RIVA TNT2 Ultra), so the chip is looked up from its own field.
   const chipLookup = refKind === "gpu";
@@ -209,6 +220,18 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   function pick(c: ReferenceCandidate) {
     const r = c.reference;
     setMatch(r);
+    // Show what the match adds in the form itself, filling only what is still empty.
+    void api
+      .referenceSnapshot(r.id)
+      .then((snap) =>
+        setSpecs((cur) => {
+          const next = { ...cur };
+          for (const [name, value] of Object.entries(snap.specs)) if (!next[name.toLowerCase()]?.trim()) next[name.toLowerCase()] = value;
+          for (const [column, value] of Object.entries(snap.columns)) if (column !== "chipset" && !next[`col:${column}`]?.trim()) next[`col:${column}`] = value;
+          return next;
+        }),
+      )
+      .catch(() => {});
     if (r.kind === "gpu") {
       // The card's own maker, model and part number stay as typed: only the chip is filled in.
       setChipset(r.display_name);
@@ -246,7 +269,18 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     setError(null);
     setSaving(true);
     try {
+      // The category's fields: item columns for a few, the item's own specs for the rest.
+      const attributes: Record<string, string> = {};
+      const columns: Record<string, string> = {};
+      for (const f of specFields) {
+        const value = (specs[specKey(f)] ?? "").trim();
+        if (!value) continue;
+        if (f.column) columns[f.column] = value;
+        else attributes[f.name] = value;
+      }
       const fields = {
+        ...columns,
+        ...(Object.keys(attributes).length ? { attributes } : {}),
         category_id: Number(effectiveCategory),
         model: model.trim(),
         manufacturer: manufacturer.trim() || null,
@@ -309,6 +343,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         setModel("");
         setPartNumber("");
         setChipset("");
+        setSpecs({});
         setNotes("");
         setFiles([]);
         setMatch(null);
@@ -386,7 +421,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        void save("another");
+        void save("close");
       }}
     >
       <div className="grid gap-4 sm:grid-cols-[11rem_minmax(0,1fr)]">
@@ -458,6 +493,28 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           />
           {source === "chipset" && dropdown}
         </div>
+      )}
+      {specFields.length > 0 && (
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm font-medium">{categoryName ? `${categoryName} specifications` : "Specifications"}</legend>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
+            {specFields.map((f, i) => (
+              <div key={`${effectiveCategory}:${f.name}`} className="grid gap-1">
+                <Label htmlFor={`qa-spec-${i}`} className="text-xs text-muted-foreground">
+                  {f.name}
+                </Label>
+                <Input
+                  id={`qa-spec-${i}`}
+                  autoComplete="off"
+                  className="h-8"
+                  placeholder={f.hint}
+                  value={specs[specKey(f)] ?? ""}
+                  onChange={(e) => setSpecs((cur) => ({ ...cur, [specKey(f)]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+        </fieldset>
       )}
       {/* One line of reserved height, so nothing here ever resizes the dialog. */}
       <div className="flex h-6 items-center gap-2 text-sm" aria-live="polite">
@@ -582,15 +639,15 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           {error}
         </p>
       )}
-      <DialogFooter>
-        <Button type="button" variant="outline" disabled={saving} onClick={() => void save("close")}>
-          Save
+      <DialogFooter className="sticky bottom-0 z-10 bg-muted">
+        <Button type="button" variant="outline" disabled={saving} onClick={() => void save("another")}>
+          Save &amp; add another
         </Button>
         <Button type="button" variant="outline" disabled={saving} onClick={() => void save("edit")}>
           Save &amp; edit
         </Button>
         <Button type="submit" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Save &amp; add another
+          {saving && <Loader2 className="animate-spin" />} Save
         </Button>
       </DialogFooter>
     </form>

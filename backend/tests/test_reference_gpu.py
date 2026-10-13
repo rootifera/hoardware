@@ -122,3 +122,12 @@ def test_candidates_for_a_card_look_up_its_chipset_not_its_own_name(client, db, 
     item = client.post(f"{API}/items", json={"category_id": gpu["id"], "model": "Viper V770 Ultra", "manufacturer": "Diamond", "chipset": "TNT2 Ultra"}).json()
     names = [c["reference"]["model"] for c in client.get(f"{API}/items/{item['id']}/reference-candidates").json()]
     assert names == ["Riva TNT2 Ultra"]
+
+
+def test_snapshot_shows_what_a_match_would_write(client, db, dataset):
+    load(db, dataset)
+    ref_id = client.get(f"{API}/reference-suggestions", params={"q": "tnt2 ultra", "kind": "gpu"}).json()[0]["reference"]["id"]
+    snap = client.get(f"{API}/reference-models/{ref_id}/snapshot").json()
+    assert snap["columns"] == {"chipset_manufacturer": "NVIDIA", "chipset": "Riva TNT2 Ultra"}
+    assert snap["specs"]["Memory size"] == "32 MB" and "Chipset" not in snap["specs"]
+    assert client.get(f"{API}/reference-models/99999/snapshot").status_code == 404

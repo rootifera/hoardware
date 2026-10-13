@@ -26,7 +26,7 @@ const SHORTCUTS: { keys: string; what: string }[] = [
   { keys: "?", what: "Show this list" },
   { keys: "Ctrl/⌘ + S", what: "Save the item you are editing" },
   { keys: "Shift + click", what: "Select a range of items in a list" },
-  { keys: "Enter in Quick add", what: "Save and add another" },
+  { keys: "Enter in Quick add", what: "Save" },
   { keys: "Esc", what: "Close a dialog or menu" },
 ];
 
