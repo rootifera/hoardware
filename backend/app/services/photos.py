@@ -62,7 +62,7 @@ def process_image(data: bytes) -> ProcessedImage:
 
 def new_keys(item_id: int, extension: str) -> tuple[str, str]:
     token = uuid.uuid4().hex
-    return f"items/{item_id}/{token}.{extension}", f"items/{item_id}/{token}_thumb.webp"
+    return f"items/{item_id}/photos/{token}.{extension}", f"items/{item_id}/photos/{token}_thumb.webp"
 
 
 def queue_deletions(session: Session, keys: list[str]) -> None:

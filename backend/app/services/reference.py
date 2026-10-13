@@ -20,7 +20,36 @@ from app.schemas import (
 # Specs worth showing in lists, per kind (names are the source's own).
 HIGHLIGHT_SPECS: dict[str, list[str]] = {
     "cpu": ["Frequency(internal max/typ)", "Bus speed", "L2 cache", "Package", "Socket", "Core", "CPUID", "Core Stepping"],
+    "gpu": ["GPU chip", "Memory size", "Memory type", "Memory bus", "Bus", "GPU clock", "Released"],
 }
+
+_SOURCE_LABELS = {"cpu-db": "CPU-DB", "gpus-specs": "GPUs-Specs"}
+
+
+def kind_for_category(name: str | None) -> str | None:
+    """Which reference kind describes items of this category, if any."""
+    if not name:
+        return None
+    if re.search(r"cpu|processor", name, re.I):
+        return "cpu"
+    if re.search(r"gpu|vga|graphics|video", name, re.I):
+        return "gpu"
+    return None
+
+
+def gpu_spec_line_of(chip: object, mem_size: object, mem_type: object, bus: object, clock: object = None) -> str:
+    """Graphics card at a glance: chip, memory, bus, core clock."""
+    parts: list[str] = []
+    if isinstance(chip, str) and chip:
+        parts.append(chip)
+    memory = " ".join(v for v in (mem_size, mem_type) if isinstance(v, str) and v)
+    if memory:
+        parts.append(memory)
+    if isinstance(bus, str) and bus:
+        parts.append(bus)
+    if isinstance(clock, str) and clock:
+        parts.append(clock)
+    return " · ".join(parts)
 
 _NO_CACHE = {"none", "0kib", "0 kib", "0", "na"}
 
@@ -55,6 +84,8 @@ _FRIENDLY = {
     "Power Thermal Design": "TDP",
 }
 _SKIP_COPY = {"references", "Comments", "Chip Type"}
+# Stored in item columns (the category's chipset fields), not in the item's specs.
+_COLUMN_SPECS = {"Chipset maker", "Chipset"}
 MAX_COPIED_SPECS = 40
 
 
@@ -62,17 +93,29 @@ def spec_snapshot(ref: ReferenceModel) -> dict[str, str]:
     """The record's specs under plain names, for copying onto an item. Only
     values the source actually states: not-applicable and blank are left out."""
     out: dict[str, str] = {}
-    if ref.family:
+    if ref.family and ref.kind == "cpu":
         out["Family"] = ref.family
     for name, value in ref.specs.items():
-        if name in _SKIP_COPY or not isinstance(value, str) or not value.strip():
+        if name in _SKIP_COPY or (ref.kind == "gpu" and name in _COLUMN_SPECS) or not isinstance(value, str) or not value.strip():
             continue
         out.setdefault(_FRIENDLY.get(name, name), value.strip())
     refs = ref.specs.get("references")
     if isinstance(refs, list) and refs and isinstance(refs[0], str):
         out["Source link"] = refs[0]
-    out["Source"] = ref.source_key.upper() if ref.source_key == "cpu-db" else ref.source_key
+    out["Source"] = _SOURCE_LABELS.get(ref.source_key, ref.source_key)
     return dict(list(out.items())[:MAX_COPIED_SPECS])
+
+
+def column_values(ref: ReferenceModel) -> dict[str, str]:
+    """Item columns a record can fill (graphics cards: chipset maker and chipset)."""
+    if ref.kind != "gpu":
+        return {}
+    out = {}
+    if isinstance(ref.specs.get("Chipset maker"), str):
+        out["chipset_manufacturer"] = ref.specs["Chipset maker"]
+    if isinstance(ref.specs.get("Chipset"), str):
+        out["chipset"] = ref.specs["Chipset"]
+    return out
 
 
 def merge_specs(existing: dict, snapshot: dict[str, str]) -> dict:
@@ -130,6 +173,15 @@ def order_code_of(part_number: str | None, sspec: object) -> str | None:
     return part_number
 
 
+def _ref_spec_line(ref: ReferenceModel) -> str:
+    s = ref.specs
+    if ref.kind == "gpu":
+        return gpu_spec_line_of(s.get("GPU chip"), s.get("Memory size"), s.get("Memory type"), s.get("Bus"), s.get("GPU clock"))
+    return spec_line_of(
+        s.get("Frequency(internal max/typ)"), s.get("Bus speed"), s.get("L2 cache"), s.get("Package"), s.get("S-Spec")
+    )
+
+
 def summary_of(ref: ReferenceModel) -> ReferenceSummary:
     keys = HIGHLIGHT_SPECS.get(ref.kind, [])
     highlights = {k: ref.specs[k] for k in keys if ref.specs.get(k) not in (None, "")}
@@ -146,13 +198,7 @@ def summary_of(ref: ReferenceModel) -> ReferenceSummary:
         order_code=order_code_of(ref.part_number, ref.specs.get("S-Spec")),
         s_spec=ref.specs.get("S-Spec") if isinstance(ref.specs.get("S-Spec"), str) else None,
         display_name=display_name_of(ref.kind, ref.family, ref.model, ref.specs),
-        spec_line=spec_line_of(
-            ref.specs.get("Frequency(internal max/typ)"),
-            ref.specs.get("Bus speed"),
-            ref.specs.get("L2 cache"),
-            ref.specs.get("Package"),
-            ref.specs.get("S-Spec"),
-        ),
+        spec_line=_ref_spec_line(ref),
     )
 
 
@@ -216,12 +262,18 @@ def _manufacturer_matches(item_manufacturer: str | None, ref_manufacturer: str |
     return a == b or a in b or b in a
 
 
-def find_candidates(session: Session, item: Item, limit: int = 15) -> list[ReferenceCandidate]:
+def find_candidates(session: Session, item: Item, limit: int = 15, kind: str | None = None) -> list[ReferenceCandidate]:
     """Suggest reference models for a stored item (see find_candidates_for)."""
     sspec = (item.attributes or {}).get("S-Spec")
     # The S-Spec is an identifier too: "BX80524R300128" + S-Spec "SL32A" together name the record.
     part = " ".join(p for p in (item.part_number, sspec if isinstance(sspec, str) else None) if p) or None
-    return find_candidates_for(session, part_number=part, model=item.model, manufacturer=item.manufacturer, limit=limit)
+    if kind == "gpu":
+        # The item is the card ("Diamond Viper V770 Ultra"); the dataset describes its chip.
+        # Look the chip up by its own field, falling back to the card's name.
+        return find_candidates_for(session, part_number=part, model=item.chipset or item.model, limit=limit, kind=kind)
+    return find_candidates_for(
+        session, part_number=part, model=item.model, manufacturer=item.manufacturer, limit=limit, kind=kind
+    )
 
 
 def find_candidates_for(
@@ -231,6 +283,7 @@ def find_candidates_for(
     model: str | None,
     manufacturer: str | None = None,
     limit: int = 15,
+    kind: str | None = None,
 ) -> list[ReferenceCandidate]:
     """Suggest reference models, best first. Precedence follows the spec: exact
     part number, then shared identifiers (S-Spec, ordering code), then name
@@ -245,6 +298,7 @@ def find_candidates_for(
         rows = session.scalars(
             select(ReferenceModel)
             .where(or_(ReferenceModel.exact_keys.overlap(probe_array), ReferenceModel.token_keys.overlap(probe_array)))
+            .where(*([ReferenceModel.kind == kind] if kind else []))
             .limit(200)
         ).all()
         for ref in rows:
@@ -263,7 +317,9 @@ def find_candidates_for(
     if not scored and _words(model):
         words = _words(manufacturer, model)
         if words:
-            stmt = select(ReferenceModel).limit(limit * 2)
+            stmt = select(ReferenceModel).limit(200 if kind == "gpu" else limit * 2)
+            if kind:
+                stmt = stmt.where(ReferenceModel.kind == kind)
             for word in words:
                 stmt = stmt.where(ReferenceModel.search_text.like(f"%{_like_escape(word)}%", escape="\\"))
             for ref in session.scalars(stmt.order_by(ReferenceModel.sort_name, ReferenceModel.id)):
@@ -273,9 +329,16 @@ def find_candidates_for(
 
     rank = {"exact": 0, "token": 1, "text": 2}
 
+    typed = match_key(model)
+    typed_words = _words(model)
+
     def sort_key(s: _Scored):
         mismatch = 0 if s.manufacturer_matches is True else (1 if s.manufacturer_matches is None else 2)
-        return (rank[s.match_type], mismatch, -len(s.matched), s.ref.sort_name, s.ref.id)
+        # Name searches: the record named exactly what was typed first, then the shortest names.
+        named = 0 if typed and match_key(s.ref.model) == typed else 1
+        # ...and records where each typed word starts a word ("rage" in "Rage Pro", not in "Mirage").
+        starts = 0 if all(re.search(r"(?<![a-z0-9])" + re.escape(w), s.ref.model.lower()) for w in typed_words) else 1
+        return (rank[s.match_type], named, starts, mismatch, -len(s.matched), len(s.ref.sort_name), s.ref.sort_name, s.ref.id)
 
     ordered = sorted(scored.values(), key=sort_key)[:limit]
     return [

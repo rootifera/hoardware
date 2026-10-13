@@ -172,8 +172,13 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
         <div className="min-w-0 space-y-1">
           <p className="text-lg font-medium">{[reference.manufacturer, reference.display_name].filter(Boolean).join(" ")}</p>
           {reference.spec_line && <p className="text-sm text-muted-foreground">{reference.spec_line}</p>}
+          {reference.kind === "gpu" && (
+            <p className="text-xs text-muted-foreground">
+              This describes the card&apos;s chip. The card itself (its maker, memory amount and clocks) can differ.
+            </p>
+          )}
           <p className="font-mono text-xs text-muted-foreground">
-            {reference.order_code ?? reference.part_number ?? reference.model}
+            {reference.kind === "gpu" ? reference.part_number : (reference.order_code ?? reference.part_number ?? reference.model)}
             {reference.s_spec && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground">S-Spec {reference.s_spec}</span>}
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -186,7 +191,7 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
           </div>
         </div>
         <div className="flex gap-2">
-          {item.model !== reference.display_name && (
+          {reference.kind !== "gpu" && item.model !== reference.display_name && (
             <Button size="sm" variant="outline" disabled={locked || busy} title={`Rename this item to “${reference.display_name}”`} onClick={onUseName}>
               Use this name
             </Button>
@@ -334,7 +339,7 @@ export function ReferencePanel({ item, locked }: { item: ItemDetail; locked: boo
       {sources.isSuccess && !hasData && !reference ? (
         <p className="text-sm text-muted-foreground">
           No reference datasets are imported, so there is nothing to match against. This is optional: everything else works without it. See
-          “Reference data” in the README to import CPU-DB.
+          “Reference data” in the README to import CPU-DB or the graphics card data.
         </p>
       ) : reference && !changing ? (
         <LinkedReference

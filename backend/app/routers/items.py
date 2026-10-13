@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.enums import Condition, IdentificationConfidence, TestStatus
-from app.models import Category, Item, Location, Photo, ReferenceModel, TestLog
+from app.models import Category, Item, ItemFile, Location, Photo, ReferenceModel, TestLog
 from app.pagination import apply_keyset, encode_cursor, decode_cursor
+from app.routers.files import file_out
 from app.schemas import (
     ItemBatchCreated,
     ItemBatchIn,
@@ -84,6 +85,12 @@ SUMMARY_COLUMNS = (
     func.coalesce(Item.attributes["L2 cache"].astext, ReferenceModel.specs["L2 cache"].astext).label("ref_l2"),
     func.coalesce(Item.attributes["Package"].astext, ReferenceModel.specs["Package"].astext).label("ref_package"),
     func.coalesce(Item.attributes["S-Spec"].astext, ReferenceModel.specs["S-Spec"].astext).label("ref_sspec"),
+    # Graphics cards: chip, memory, bus, clock (the item's own values first).
+    func.coalesce(Item.chipset, ReferenceModel.specs["Chipset"].astext).label("gpu_chipset"),
+    func.coalesce(Item.attributes["Memory size"].astext, ReferenceModel.specs["Memory size"].astext).label("gpu_mem_size"),
+    func.coalesce(Item.attributes["Memory type"].astext, ReferenceModel.specs["Memory type"].astext).label("gpu_mem_type"),
+    func.coalesce(Item.attributes["Bus"].astext, ReferenceModel.specs["Bus"].astext).label("gpu_bus"),
+    func.coalesce(Item.attributes["GPU clock"].astext, ReferenceModel.specs["GPU clock"].astext).label("gpu_clock"),
 )
 DETAIL_COLUMNS = SUMMARY_COLUMNS + (
     Item.test_notes,
@@ -143,7 +150,13 @@ def _thumbnails(session: Session, item_ids: list[int]) -> dict[int, int]:
 def _spec_line(row) -> str | None:
     # Built from the item's own specs (copied from a match or typed in), so the
     # line is the item's information; an older match without copied specs still shows.
-    return reference_service.spec_line_of(row.ref_freq, row.ref_bus, row.ref_l2, row.ref_package, row.ref_sspec) or None
+    cpu = reference_service.spec_line_of(row.ref_freq, row.ref_bus, row.ref_l2, row.ref_package, row.ref_sspec)
+    if cpu:
+        return cpu
+    return (
+        reference_service.gpu_spec_line_of(row.gpu_chipset, row.gpu_mem_size, row.gpu_mem_type, row.gpu_bus, row.gpu_clock)
+        or None
+    )
 
 
 def _summary(row, thumbs: dict[int, int]) -> ItemSummary:
@@ -167,10 +180,11 @@ def load_detail(session: Session, item_id: int) -> ItemDetail:
     photos = session.scalars(
         select(Photo).where(Photo.item_id == item_id).order_by(Photo.sort_order, Photo.id)
     ).all()
+    files = session.scalars(select(ItemFile).where(ItemFile.item_id == item_id).order_by(ItemFile.kind, ItemFile.filename, ItemFile.id)).all()
     fields = {
         name: getattr(row, name)
         for name in ItemDetail.model_fields
-        if name not in ("thumbnail_url", "photos", "reference", "last_tested_on", "spec_line")
+        if name not in ("thumbnail_url", "photos", "files", "reference", "last_tested_on", "spec_line")
     }
     reference = session.get(ReferenceModel, row.reference_model_id) if row.reference_model_id else None
     last_tested = session.scalar(select(func.max(TestLog.tested_on)).where(TestLog.item_id == item_id))
@@ -181,6 +195,7 @@ def load_detail(session: Session, item_id: int) -> ItemDetail:
         reference=reference_service.detail_of(session, reference) if reference else None,
         thumbnail_url=thumbnail_url(photos[0].id) if photos else None,
         photos=[photo_out(p) for p in photos],
+        files=[file_out(f) for f in files],
     )
 
 
@@ -270,6 +285,9 @@ def create_item(body: ItemCreate, session: SessionDep):
         # The match's specs become the item's own (what the user typed wins).
         ref = session.get(ReferenceModel, body.reference_model_id)
         fields["attributes"] = reference_service.merge_specs(fields["attributes"], reference_service.spec_snapshot(ref))
+        for column, value in reference_service.column_values(ref).items():
+            if not fields.get(column):
+                fields[column] = value
     item = Item(**fields, acquired_on=body.acquired_on)
     session.add(item)
     session.flush()
@@ -318,6 +336,9 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
     if template.reference_model_id is not None:
         ref = session.get(ReferenceModel, template.reference_model_id)
         fields["attributes"] = reference_service.merge_specs(fields["attributes"], reference_service.spec_snapshot(ref))
+        for column, value in reference_service.column_values(ref).items():
+            if not fields.get(column):
+                fields[column] = value
     created: list[Item] = []
     for index in range(body.copies):
         order = body.order_start + index if body.order_start is not None else None
@@ -380,6 +401,7 @@ def delete_item(item_id: int, session: SessionDep):
         keys += [storage_key, thumb_key]
     # Queue object deletions in the same transaction as the row deletion, then
     # try them straight away; anything that fails is retried by storage-gc.
+    keys += session.scalars(select(ItemFile.storage_key).where(ItemFile.item_id == item_id)).all()
     queue_deletions(session, keys)
     session.delete(item)
     session.commit()

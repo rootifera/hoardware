@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
+import { FileManager } from "@/components/file-manager";
 import { PhotoManager } from "@/components/photo-manager";
 import { useQuickAdd } from "@/components/quick-add";
 import { ReferencePanel } from "@/components/reference-panel";
@@ -576,6 +577,10 @@ function ItemEditor({ item }: { item: Item }) {
               Save
             </button>
           </form>
+
+          <Section title="Downloads" description="Manuals, drivers, firmware, tools and anything else that goes with this item.">
+            <FileManager item={item} />
+          </Section>
 
           <TestHistory item={item} locked={dirty} />
           <ReferencePanel item={item} locked={dirty} />

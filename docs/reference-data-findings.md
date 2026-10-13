@@ -72,3 +72,8 @@ Neither dataset can identify a board. `Brand` is always the chip vendor; probing
 ## Update: the S-Spec table is now used
 
 `supplemental_db/cpu-db.supplemetal.Intel.S-Spec_numbers.csv` (6,182 rows: S-Spec, speed, bus speed, L2 size, package, order code) is read by the importer when present. Matching main records (joined on the S-Spec token inside their part number, Intel only) gain **Bus speed** and any speed/cache/package they lacked; the main file's own values always win. S-Specs absent from the main files become records of their own (`sspec|<code>`, about 1,260). Measured on the real data: 4,271 existing records changed, 1,262 added, 26,806 in total, and a repeat import changes nothing. The table has the same limitation as the main file: no marketing names ("300A"), no socket or stepping.
+
+
+## Update: graphics cards (GPUs-Specs) are now importable
+
+`GpuSpecsAdapter` (`gpus-specs`) reads `gpu_1986-2026.csv` (3,203 rows). Measured on the real file: 3,200 added, 3 exact duplicate rows skipped, 0 errors; a repeat import changes nothing. Curated columns are copied under plain names (GPU chip, Memory size/type/bus, Bus, GPU clock, Released, Board number, Outputs...); the "Mobile" and "Integrated" column groups fill in when the desktop ones are empty; "unknown" is not a value. Records are chip/reference-product level (the dataset has no card makers), so the UI says so and never lets the chip vendor replace a typed manufacturer. dbgpu was not used (its data is only a pickle). Retro coverage is thin but includes Voodoo, TNT, Rage, Millennium and many ISA/VLB cards from 1986.

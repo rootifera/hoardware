@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Item, ReferenceModel
+from app.models import Category, Item, ReferenceModel
 from app.pagination import apply_keyset, decode_cursor, encode_cursor
 from app.routers.items import load_detail
 from app.schemas import (
@@ -76,11 +76,12 @@ def get_reference_model(reference_id: int, session: SessionDep):
 def reference_suggestions(
     session: SessionDep,
     q: Annotated[str, Query(min_length=2, max_length=200)],
+    kind: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 6,
 ):
     """Suggestions for text typed while adding an item: a part number, an
     S-Spec or ordering code, or a name. Empty when no dataset is imported."""
-    return service.find_candidates_for(session, part_number=q, model=q, limit=limit)
+    return service.find_candidates_for(session, part_number=q, model=q, limit=limit, kind=kind)
 
 
 @router.get("/items/{item_id}/reference-candidates", response_model=list[ReferenceCandidate])
@@ -88,7 +89,8 @@ def reference_candidates(item_id: int, session: SessionDep, limit: Annotated[int
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(404, "item not found")
-    return service.find_candidates(session, item, limit)
+    category = session.get(Category, item.category_id)
+    return service.find_candidates(session, item, limit, kind=service.kind_for_category(category.name if category else None))
 
 
 @router.post("/items/{item_id}/reference-match", response_model=ItemDetail)
@@ -101,6 +103,9 @@ def link_reference(item_id: int, body: ReferenceMatchIn, session: SessionDep):
         raise HTTPException(422, "reference model does not exist")
     if body.copy_specs:
         item.attributes = service.merge_specs(item.attributes or {}, service.spec_snapshot(ref))
+        for column, value in service.column_values(ref).items():
+            if not getattr(item, column):
+                setattr(item, column, value)
         # An item saved before the S-Spec was its own field has the combined
         # "order code + S-Spec" as its part number: keep just the order code.
         order_code = service.order_code_of(ref.part_number, ref.specs.get("S-Spec"))

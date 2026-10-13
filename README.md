@@ -39,6 +39,7 @@ Everyday use needs no internet access. (Building the images does.)
 - **Status strip**: above the list, chips show how many items are Untested, Unknown, POST, Full Test or Dead (respecting your other filters); click one to filter.
 - **Test history**: every change of an item's test status is logged automatically with the date and the notes in force at the time, and you can log a test by hand (result, date, what was tested). The item page shows the history and when it was last tested. Items created by CSV import start with no history.
 - **Test status vs condition**: independent. `Unknown` means testing is currently impossible (note why in *Test notes*); `Untested` means not tried yet.
+- **Downloads**: each item has a *Downloads* section for manuals, drivers, firmware/BIOS, tools and datasheets. Drop files on it (up to `MAX_FILE_BYTES`, 250 MB by default); each file gets a kind (guessed from the extension, changeable), a description (version, OS…) and a download link. Files are always sent as attachments, never opened in the browser, and are stored (and streamed) via the same photo storage, S3 when configured.
 - **Every physical item is its own record** with its own code (`HW-000001`, never reused), so identical parts can differ in location, condition and test result.
 - **Locations**: a tree (`Workshop > Shelf 2 > CPU Box 3`); moving or renaming a location updates everything inside it.
 - **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Copies** = 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
@@ -46,11 +47,12 @@ Everyday use needs no internet access. (Building the images does.)
 - **Bulk actions**: tick rows (shift-click selects a range, or *Select all N matching* for everything the filters match) and a bar appears: set the test status, condition, category or test notes, or **Move…** to a location. When moving you choose what happens to positions: clear them, number on after the last one in the destination, or keep them (refused if any would clash, with a count shown before you commit). On a location's page, **Move all items…** moves everything out of it.
 - **CSV export and import**: the **CSV** button exports the current filter (streamed, so it works at any size). **Import** takes a CSV (the export's columns, a template is provided, and friendly header names such as `name`, `p/n` work too), checks every row first and shows the problems by line, and writes nothing until you confirm. It is all-or-nothing unless you tick *Skip rows with errors*; *Create missing categories/locations* fill in what the file refers to. Every row becomes a new item with a new code.
 
-## Photo storage
+## Photo and file storage
 
-Photos are stored outside the database. Two backends, chosen with `STORAGE_BACKEND`:
+Photos and downloads (manuals, drivers, tools…) are stored outside the database, in the same place. `STORAGE_BACKEND` chooses it:
 
-- `local` (default): the `photos` Docker volume.
+- `auto` (default): S3 if `S3_BUCKET` is set, otherwise the local volume. Configure S3 and everything goes there, nothing else to switch.
+- `local`: always the `photos` Docker volume.
 - `s3`: any S3-compatible service (AWS S3, RustFS, MinIO, Backblaze B2, Cloudflare R2…).
 
 ```env
@@ -58,20 +60,22 @@ STORAGE_BACKEND=s3
 S3_ENDPOINT_URL=http://your-s3-host:9000   # empty for AWS S3
 S3_REGION=us-east-1
 S3_BUCKET=hoardware                        # must already exist
-S3_PREFIX=photos/
+S3_PREFIX=                                 # empty = bucket root
 S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 S3_FORCE_PATH_STYLE=true                   # true for most self-hosted services
 ```
 
-The bucket stays private: the backend streams photos itself. If the S3 service runs outside this Compose project, the `backend` container must be able to reach `S3_ENDPOINT_URL` (use the host's LAN address, or `host.docker.internal`).
+Objects are stored as `<S3_PREFIX>items/<item id>/photos/<uuid>.jpg` (plus `_thumb.webp`) and `<S3_PREFIX>items/<item id>/files/<id>/<original file name>`, so the bucket is readable when browsed directly. The bucket stays private: the backend streams everything itself. If the S3 service runs outside this Compose project, the `backend` container must be able to reach `S3_ENDPOINT_URL` (use the host's LAN address, or `host.docker.internal`).
 
-The database stores only backend-independent keys. To switch backends with existing photos:
+The database stores only backend-independent keys. When S3 is configured after photos or files were already saved locally, copy them across (photos and downloads both):
 
 ```bash
 docker compose run --rm --no-deps backend python -m app.cli migrate-photos --from local --to s3
-# then set STORAGE_BACKEND=s3 in .env and: docker compose up -d
+# then configure S3 (STORAGE_BACKEND=auto picks it up) and: docker compose up -d
 ```
+
+Objects saved under an older layout (or the former default prefix `photos/`) are moved with `docker compose run --rm --no-deps backend python -m app.cli relayout-storage --from-prefix photos/` (leave out `--from-prefix` for local storage).
 
 Add `--delete-source` to remove each object from the old backend after it has been copied. If an object cannot be deleted when a photo or item is removed (storage outage), it is queued and retried with `python -m app.cli storage-gc`.
 
@@ -135,6 +139,16 @@ docker compose run --rm --no-deps backend python -m app.cli import-reference cpu
 ```
 
 The import is repeatable: re-running reports `added / changed / unchanged / skipped / errors`, updates records in place (so existing links survive) and never deletes records. Findings about the dataset's quirks, and why the GPU datasets are not imported, are in [docs/reference-data-findings.md](docs/reference-data-findings.md).
+
+### Graphics cards
+
+The GPUs-Specs dataset (<https://github.com/RonnyMuthomi/GPUs-Specs>, a TechPowerUp-derived CSV; 3,200 chips and reference cards from 1986 on) is supported the same way: clone it (or just `gpu_*.csv`) into `./reference-data/gpus-specs/` and run
+
+```bash
+docker compose run --rm --no-deps backend python -m app.cli import-reference gpus-specs /reference-data/gpus-specs
+```
+
+A graphics card is two things: the **card** (maker + model, e.g. *Diamond Viper V770 Ultra*, which no dataset knows) and its **chip** (*RIVA TNT2 Ultra*, which the dataset does). Quick add has a **Chipset** field for the chip: type `tnt2 ultra`, `voodoo3 3000` or `rage pro` there and pick the suggestion. The card's manufacturer, model and part number are never touched; the chipset maker, chipset and the chip's specs (GPU chip, memory size, type and bus width, bus, clocks, release date…) are saved onto the item, so one item holds both. The inventory row shows the chip summary under the card's name. Your own values always win over the dataset's. On an existing card, **Find reference match** looks up its *Chipset* field.
 
 **While adding a CPU:** open Quick add and type the code printed on the chip (an S-Spec such as `SL32A`, or an ordering code) into *Part number* or *Model*, or a name in a CPU category. A dropdown floats under the field with matching records, each showing a readable name, the full part number and the key specs (speed, bus, cache, package); nothing is filled in until you click one, and the dialog never changes size. Picking it fills the manufacturer, the **part number as the order code only** (e.g. `BX80524R300128`; the **S-Spec**, the short code printed on the chip such as `SL32A`, is saved as its own spec), the CPU category (even if another was selected) and a proper model name built from the record (e.g. "Celeron 300MHz 128KiB L2"), replacing a model field that only held the code you typed (but never a name you wrote yourself). The match is saved with the item as confirmed and **its specs are copied onto the item itself** (Speed, Bus speed, L2 cache, Package, Family, source link…, listed under *Specifications*): they belong to the item, are editable, show up as a one-line summary under the name in the inventory, are searchable (try `sepp` or `66mhz`) and travel in the CSV export/import (`specs` column). What you typed always wins, and unlinking keeps the specs. The link only remembers where they came from; the original dataset record is under a collapsed *The original record in the dataset* on the item page. Edit any field you like, or press ✕ on the green line to drop the match. The dataset names chips only by family and speed, so the cache is added to tell a plain "Celeron 300" (no cache) from a "300A" (128 KiB); marketing names are not invented.
 

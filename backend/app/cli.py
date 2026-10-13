@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.backup import create_backup, list_backups, restore_backup
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Photo
+from app.models import ItemFile, Photo
 from app.reference.registry import ADAPTERS
 from app.reference.runner import ImportReport, run_import
 from app.services.photos import process_pending_deletions
@@ -65,7 +65,8 @@ def cmd_migrate_photos(args: argparse.Namespace) -> int:
     copied = skipped = failed = 0
     with SessionLocal() as session:
         photos = session.execute(select(Photo.id, Photo.storage_key, Photo.thumb_key)).yield_per(500)
-        for photo_id, *keys in photos:
+        files = session.execute(select(ItemFile.id, ItemFile.storage_key)).yield_per(500)
+        for photo_id, *keys in [*photos, *files]:
             for key in keys:
                 try:
                     if target.exists(key):
@@ -85,6 +86,56 @@ def cmd_migrate_photos(args: argparse.Namespace) -> int:
     print(f"copied {copied}, already present {skipped}, failed {failed}")
     if not failed:
         print(f"Now set STORAGE_BACKEND={args.target} and restart the backend.")
+    return 1 if failed else 0
+
+
+def _new_layout_key(kind: str, item_id: int, key: str, filename: str | None = None) -> str:
+    """The current key layout for an object stored under an older one."""
+    parts = key.split("/")
+    if kind == "photo":
+        # items/<id>/<uuid>.<ext>  ->  items/<id>/photos/<uuid>.<ext>
+        return key if len(parts) != 3 else f"items/{item_id}/photos/{parts[2]}"
+    # items/<id>/files/<uuid>  ->  items/<id>/files/<8 hex>/<file name>
+    if len(parts) != 4 or parts[2] != "files" or len(parts[3]) != 32:
+        return key
+    return f"items/{item_id}/files/{parts[3][:8]}/{filename}"
+
+
+def cmd_relayout_storage(args: argparse.Namespace) -> int:
+    """Move stored objects to the current layout (items/<id>/photos|files/...) and,
+    with --from-prefix, out of an old S3 prefix (e.g. the former default ``photos/``)."""
+    target = get_storage()
+    source = build_storage(target.name)
+    if args.from_prefix is not None:
+        if target.name != "s3":
+            print("--from-prefix only applies to the s3 backend", file=sys.stderr)
+            return 2
+        source.prefix = args.from_prefix
+    prefix_moves = args.from_prefix is not None and args.from_prefix != getattr(target, "prefix", None)
+    moved = skipped = failed = 0
+    with SessionLocal() as session:
+        rows = [("photo", p, a) for p in session.scalars(select(Photo)) for a in ("storage_key", "thumb_key")]
+        rows += [("file", f, "storage_key") for f in session.scalars(select(ItemFile))]
+        for kind, row, attr in rows:
+            old = getattr(row, attr)
+            new = _new_layout_key(kind, row.item_id, old, getattr(row, "filename", None))
+            if new == old and not prefix_moves:
+                skipped += 1
+                continue
+            try:
+                if not target.exists(new):
+                    chunks, _size = source.open(old)
+                    target.put(new, b"".join(chunks), "application/octet-stream")
+                if new != old:
+                    setattr(row, attr, new)
+                    session.commit()
+                source.delete(old)
+                moved += 1
+            except (StorageError, ObjectNotFound) as exc:
+                session.rollback()
+                failed += 1
+                print(f"{old}: {exc}", file=sys.stderr)
+    print(f"moved {moved}, already in place {skipped}, failed {failed}")
     return 1 if failed else 0
 
 
@@ -130,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
     migrate.add_argument("--to", dest="target", choices=["local", "s3"], required=True)
     migrate.add_argument("--delete-source", action="store_true", help="remove each object from the source after copying")
     migrate.set_defaults(func=cmd_migrate_photos)
+
+    relayout = sub.add_parser("relayout-storage", help="move stored photos and files to the current key layout")
+    relayout.add_argument("--from-prefix", help="the S3 prefix the objects are in now (e.g. photos/)")
+    relayout.set_defaults(func=cmd_relayout_storage)
 
     imp = sub.add_parser("import-reference", help="import a reference hardware dataset from local files")
     imp.add_argument("source", choices=sorted(ADAPTERS))

@@ -14,9 +14,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://hoardware:hoardware@db:5432/hoardware"
 
     # Photos
-    storage_backend: Literal["local", "s3"] = "local"
+    # "auto" uses S3 when a bucket is configured, otherwise the local volume.
+    storage_backend: Literal["auto", "local", "s3"] = "auto"
     photos_dir: Path = Path("/data/photos")
     max_upload_bytes: int = 20 * 1024 * 1024
+    max_file_bytes: int = 250 * 1024 * 1024  # manuals, drivers, tools
     max_image_pixels: int = 100_000_000
     thumbnail_size: int = 480
 
@@ -24,7 +26,7 @@ class Settings(BaseSettings):
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
     s3_bucket: str | None = None
-    s3_prefix: str = "photos/"
+    s3_prefix: str = ""  # empty = the bucket root: items/<id>/...
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
     s3_force_path_style: bool = True

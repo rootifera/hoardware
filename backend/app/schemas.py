@@ -3,7 +3,7 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
-from app.enums import Condition, IdentificationConfidence, PhotoRole, TestStatus
+from app.enums import Condition, FileKind, IdentificationConfidence, PhotoRole, TestStatus
 
 
 def _blank_to_none(value: Any) -> Any:
@@ -149,6 +149,24 @@ class PhotoUpdate(BaseModel):
     sort_order: int | None = None
 
 
+class FileOut(BaseModel):
+    id: int
+    item_id: int
+    filename: str
+    kind: FileKind
+    description: str | None
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+    url: str
+
+
+class FileUpdate(BaseModel):
+    kind: FileKind | None = None
+    description: OptText = None
+    filename: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+
+
 # --- items --------------------------------------------------------------------
 
 
@@ -265,6 +283,7 @@ class ItemDetail(ItemSummary):
     reference: ReferenceDetail | None = None
     attributes: dict[str, Any]
     photos: list[PhotoOut]
+    files: list[FileOut] = []
 
 
 class _ItemFields(BaseModel):

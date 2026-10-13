@@ -110,7 +110,7 @@ test("Attach a photo to an item", async ({ page, request }) => {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
   await page.goto(`/items/${item.id}`);
-  await page.locator('input[type="file"]').setInputFiles({ name: "front.png", mimeType: "image/png", buffer: png });
+  await page.getByLabel("Add photos", { exact: true }).setInputFiles({ name: "front.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("1 photo added")).toBeVisible();
   await expect(page.getByRole("img", { name: "other photo" })).toBeVisible();
 
@@ -174,7 +174,7 @@ test("Ten identical CPUs sit at ten exact positions in one location", async ({ p
   await qa.getByLabel("Position").fill("1");
   await qa.getByLabel("Copies").fill("10");
   await expect(qa.getByText("10 separate items at positions 1–10.")).toBeVisible();
-  await qa.getByRole("button", { name: "Save & close" }).click();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added 10 items/)).toBeVisible();
   await trackByModel(request, model);
 
@@ -347,7 +347,7 @@ test("A photo can be made the cover and becomes the list thumbnail", async ({ pa
   const red = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const files = [0, 1].map((n) => ({ name: `p${n}.png`, mimeType: "image/png", buffer: png(red) }));
   await page.goto(`/items/${item.id}`);
-  await page.locator('input[type="file"]').setInputFiles(files);
+  await page.getByLabel("Add photos", { exact: true }).setInputFiles(files);
   await expect(page.getByText("2 photos added")).toBeVisible();
   const before = (await (await request.get(`/api/v1/items/${item.id}`)).json()).photos;
 
@@ -449,7 +449,7 @@ test("Spec names are suggested, and 'Add another like this' prefills Quick Add",
   await expect(qa.getByText("You already have 1 matching item.")).toBeVisible();
   await qa.getByLabel("Condition").click();
   await page.getByRole("option", { name: "Poor", exact: true }).click();
-  await qa.getByRole("button", { name: "Save & close" }).click();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
   await trackByModel(request, model);
   const items = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(model)}&limit=10`)).json()).items;
@@ -508,7 +508,7 @@ test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({
   expect(await qa.boundingBox()).toEqual(before);
   expect(await qa.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 
-  await qa.getByRole("button", { name: "Save & close" }).click();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
 
   // Only touch the item we just made: the newest one with that part number.
@@ -627,7 +627,7 @@ test("Typing the S-Spec into Model gets a proper name, full specs, and a useful 
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel");
   await expect(qa.getByLabel("Part number")).toHaveValue("BX80524R300128");
   await expect(qa.getByText(/300MHz · 66MHz bus · 128KiB L2/)).toBeVisible();
-  await qa.getByRole("button", { name: "Save & close" }).click();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
 
   const newest = (await (await request.get("/api/v1/items?q=sl32a&sort=newest&limit=1")).json()).items[0];
@@ -729,4 +729,126 @@ test("Category fields can be edited on the Categories page and change the item p
     await request.delete(`/api/v1/items/${item.id}`);
     await request.delete(`/api/v1/categories/${created_cat.id}`);
   }
+});
+
+test("The photo role dropdown is wide enough to read", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Role card ${RUN}` } })).json();
+  created.push(item.id);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.goto(`/items/${item.id}`);
+  await page.getByLabel("Add photos", { exact: true }).setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByText("1 photo added")).toBeVisible();
+  const trigger = page.getByRole("combobox", { name: "Photo role" });
+  const tile = await page.getByRole("img", { name: "other photo" }).boundingBox();
+  const box = await trigger.boundingBox();
+  expect(box!.width).toBeGreaterThan(tile!.width * 0.9);
+  await trigger.click();
+  await expect(page.getByRole("option", { name: "Label / sticker" })).toBeVisible();
+  await page.getByRole("option", { name: "Chipset" }).click();
+  await expect(trigger).toContainText("Chipset");
+});
+
+test("Manuals and drivers can be attached, downloaded and removed", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[1].id, model: `Downloads card ${RUN}` } })).json();
+  created.push(item.id);
+  await page.goto(`/items/${item.id}`);
+  await expect(page.getByRole("heading", { name: "Downloads", exact: true })).toBeVisible();
+
+  await page.getByLabel("Add files", { exact: true }).setInputFiles([
+    { name: "User manual.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 hello") },
+    { name: "win98-driver.zip", mimeType: "application/zip", buffer: Buffer.from("PK-driver") },
+  ]);
+  await expect(page.getByText("2 files added")).toBeVisible();
+  await expect(page.getByRole("link", { name: /User manual\.pdf/ })).toBeVisible();
+  // The kind was guessed from the extension and can be changed.
+  await expect(page.getByRole("combobox", { name: "Kind of User manual.pdf" })).toContainText("Manual");
+  const kind = page.getByRole("combobox", { name: "Kind of win98-driver.zip" });
+  await kind.click();
+  await page.getByRole("option", { name: "Driver" }).click();
+  await expect(kind).toContainText("Driver");
+  await page.getByLabel("Description of win98-driver.zip").fill("Win98 SE, v4.1");
+  await page.getByLabel("Description of win98-driver.zip").blur();
+  await expect(async () => {
+    const files = (await (await request.get(`/api/v1/items/${item.id}`)).json()).files;
+    const f = files.find((x: { filename: string }) => x.filename === "win98-driver.zip");
+    expect(f.kind).toBe("driver");
+    expect(f.description).toBe("Win98 SE, v4.1");
+  }).toPass();
+
+  const link = page.getByRole("link", { name: /User manual\.pdf/ });
+  const res = await request.get((await link.getAttribute("href"))!);
+  expect(res.status()).toBe(200);
+  expect(await res.text()).toBe("%PDF-1.4 hello");
+  expect(res.headers()["content-disposition"]).toContain("attachment");
+
+  await page.getByRole("button", { name: "Delete User manual.pdf" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("File deleted")).toBeVisible();
+  await expect(page.getByRole("link", { name: /User manual\.pdf/ })).toHaveCount(0);
+});
+
+test("A graphics card keeps its own name; the chipset is looked up separately", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { key: string; models: number }) => s.key === "gpus-specs" && s.models > 0), "no graphics dataset imported");
+
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "GPU/VGA", exact: true }).click();
+  await qa.getByLabel("Model / description").fill("Viper V770 Ultra");
+  await qa.getByLabel("Manufacturer").fill("Diamond");
+  // The card's own name is never looked up.
+  await page.waitForTimeout(700);
+  await expect(qa.getByRole("group", { name: "Suggestions" })).toHaveCount(0);
+
+  const before = await qa.boundingBox();
+  await qa.getByLabel("Chipset", { exact: true }).fill("tnt2 ultra");
+  const suggestions = qa.getByRole("group", { name: "Suggestions" });
+  await expect(suggestions.getByRole("button", { name: /Riva TNT2 Ultra/ })).toContainText("NV5 · 32 MB SDR · AGP 4x");
+  expect(await qa.boundingBox()).toEqual(before);
+  await suggestions.getByRole("button", { name: /Riva TNT2 Ultra/ }).click();
+  await expect(qa.getByLabel("Chipset", { exact: true })).toHaveValue("Riva TNT2 Ultra");
+  await expect(qa.getByLabel("Model / description")).toHaveValue("Viper V770 Ultra");
+  await expect(qa.getByLabel("Manufacturer")).toHaveValue("Diamond");
+  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+
+  const newest = (await (await request.get("/api/v1/items?q=viper&sort=newest&limit=1")).json()).items[0];
+  created.push(newest.id);
+  expect(newest.model).toBe("Viper V770 Ultra");
+  expect(newest.spec_line).toContain("Riva TNT2 Ultra · 32 MB SDR · AGP 4x");
+  await page.goto(`/items/${newest.id}`);
+  await expect(page.getByLabel("Model / description")).toHaveValue("Viper V770 Ultra");
+  await expect(page.getByLabel("Manufacturer", { exact: true })).toHaveValue("Diamond");
+  await expect(page.getByLabel("Chipset maker")).toHaveValue("NVIDIA");
+  await expect(page.getByLabel("Chipset", { exact: true })).toHaveValue("Riva TNT2 Ultra");
+  await expect(page.getByLabel("GPU chip", { exact: true })).toHaveValue("NV5");
+  await expect(page.getByLabel("Memory size", { exact: true })).toHaveValue("32 MB");
+  await expect(page.getByText("This describes the card")).toBeVisible();
+});
+
+test("Quick add: manufacturer and model sit side by side, and Save & edit opens the new item", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  const maker = await qa.getByLabel("Manufacturer").boundingBox();
+  const model = await qa.getByLabel("Model / description").boundingBox();
+  expect(Math.abs(maker!.y - model!.y)).toBeLessThan(4);
+  expect(maker!.x).toBeLessThan(model!.x);
+  const part = await qa.getByLabel("Part number").boundingBox();
+  expect(part!.y).toBeLessThan(maker!.y);
+
+  await expect(qa.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+  await expect(qa.getByRole("button", { name: "Save & add another" })).toBeVisible();
+  await qa.getByLabel("Model / description").fill(`Edit me ${RUN}`);
+  await qa.getByRole("button", { name: "Save & edit" }).click();
+  await expect(page).toHaveURL(/\/items\/\d+$/);
+  await expect(page.getByLabel("Model / description")).toHaveValue(`Edit me ${RUN}`);
+  created.push(Number(page.url().split("/").pop()));
 });

@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import { PHOTO_ROLES, type ItemDetail, type Photo, type PhotoRole } from "@/lib/types";
+import { PHOTO_ROLES, PHOTO_ROLE_LABELS, type ItemDetail, type Photo, type PhotoRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ACCEPT = "image/jpeg,image/png,image/gif,image/webp";
@@ -67,37 +67,39 @@ export function PhotoManager({ item }: { item: ItemDetail }) {
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
         {item.photos.map((photo, index) => (
-          <div key={photo.id} className="group space-y-1.5 rounded-lg border p-1.5">
-            <button type="button" className="block w-full" onClick={() => setViewing(photo)} aria-label="View photo">
-              {/* eslint-disable-next-line @next/next/no-img-element -- thumbnails are pre-sized by the backend */}
-              <img src={photo.thumbnail_url} alt={photo.caption ?? `${photo.role} photo`} className="aspect-square w-full rounded-md bg-muted object-cover" />
-            </button>
-            <div className="flex items-center gap-1">
-              <SimpleSelect
-                size="sm"
-                className="min-w-0 flex-1"
-                aria-label="Photo role"
-                value={photo.role}
-                onChange={(role) => update.mutate({ id: photo.id, role: role as PhotoRole })}
-                options={PHOTO_ROLES.map((r) => ({ value: r, label: r }))}
-              />
-              {index > 0 && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Make this the cover photo"
-                  title="Make this the cover photo (shown in lists)"
-                  onClick={() => update.mutate({ id: photo.id, sort_order: Math.min(...item.photos.map((p) => p.sort_order)) - 1 })}
-                >
-                  <Star />
+          <div key={photo.id} className={cn("group space-y-1.5 rounded-lg border p-1.5", index === 0 && item.photos.length > 1 && "col-span-2")}>
+            <div className="relative">
+              <button type="button" className="block w-full" onClick={() => setViewing(photo)} aria-label="View photo">
+                {/* eslint-disable-next-line @next/next/no-img-element -- thumbnails are pre-sized by the backend */}
+                <img src={photo.thumbnail_url} alt={photo.caption ?? `${photo.role} photo`} className="aspect-square w-full rounded-md bg-muted object-cover" />
+              </button>
+              <div className="absolute top-1 right-1 flex gap-1">
+                {index > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    aria-label="Make this the cover photo"
+                    title="Make this the cover photo (shown in lists)"
+                    onClick={() => update.mutate({ id: photo.id, sort_order: Math.min(...item.photos.map((p) => p.sort_order)) - 1 })}
+                  >
+                    <Star />
+                  </Button>
+                )}
+                <Button variant="secondary" size="icon-sm" aria-label="Delete photo" onClick={() => setDeleting(photo)}>
+                  <Trash2 />
                 </Button>
-              )}
-              <Button variant="ghost" size="icon-sm" aria-label="Delete photo" onClick={() => setDeleting(photo)}>
-                <Trash2 />
-              </Button>
+              </div>
             </div>
+            <SimpleSelect
+              size="sm"
+              className="w-full"
+              aria-label="Photo role"
+              value={photo.role}
+              onChange={(role) => update.mutate({ id: photo.id, role: role as PhotoRole })}
+              options={PHOTO_ROLES.map((r) => ({ value: r, label: PHOTO_ROLE_LABELS[r] }))}
+            />
             <Input
               className="h-7 text-xs"
               placeholder="Caption"

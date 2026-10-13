@@ -24,6 +24,7 @@ os.environ.update(
     STORAGE_BACKEND="local",
     PHOTOS_DIR=str(_photos_dir),
     MAX_UPLOAD_BYTES=str(1024 * 1024),
+    MAX_FILE_BYTES=str(3 * 1024 * 1024),
 )
 
 
@@ -65,6 +66,11 @@ _spec9 = importlib.util.spec_from_file_location("seed_fields9", Path(__file__).r
 _seed_fields9 = importlib.util.module_from_spec(_spec9)
 _spec9.loader.exec_module(_seed_fields9)
 DEFAULT_FIELDS["cpu"] = _seed_fields9.with_sspec(list(DEFAULT_FIELDS["cpu"]))
+
+_spec11 = importlib.util.spec_from_file_location("seed_fields11", Path(__file__).resolve().parent.parent / "alembic/versions/0011_gpu_fields.py")
+_seed_fields11 = importlib.util.module_from_spec(_spec11)
+_spec11.loader.exec_module(_seed_fields11)
+DEFAULT_FIELDS["gpu/vga"] = list(_seed_fields11.NEW)
 
 
 @pytest.fixture(autouse=True)

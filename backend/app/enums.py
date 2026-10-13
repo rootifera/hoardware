@@ -35,5 +35,14 @@ class PhotoRole(StrEnum):
     OTHER = "other"
 
 
+class FileKind(StrEnum):
+    MANUAL = "manual"
+    DRIVER = "driver"
+    FIRMWARE = "firmware"
+    TOOL = "tool"
+    DATASHEET = "datasheet"
+    OTHER = "other"
+
+
 def sql_in(enum: type[StrEnum]) -> str:
     return ", ".join(f"'{m.value}'" for m in enum)

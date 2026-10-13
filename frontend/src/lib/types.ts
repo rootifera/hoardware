@@ -9,6 +9,25 @@ export type Confidence = (typeof CONFIDENCES)[number];
 
 export const PHOTO_ROLES = ["front", "back", "label", "chipset", "other"] as const;
 export type PhotoRole = (typeof PHOTO_ROLES)[number];
+export const PHOTO_ROLE_LABELS: Record<PhotoRole, string> = {
+  front: "Front",
+  back: "Back",
+  label: "Label / sticker",
+  chipset: "Chipset",
+  other: "Other",
+};
+
+export const FILE_KINDS = ["manual", "driver", "firmware", "tool", "datasheet", "other"] as const;
+export type FileKind = (typeof FILE_KINDS)[number];
+
+export const FILE_KIND_LABELS: Record<FileKind, string> = {
+  manual: "Manual",
+  driver: "Driver",
+  firmware: "Firmware / BIOS",
+  tool: "Tool",
+  datasheet: "Datasheet",
+  other: "Other",
+};
 
 export interface CategoryField {
   name: string;
@@ -56,6 +75,19 @@ export interface Photo {
   created_at: string;
   url: string;
   thumbnail_url: string;
+}
+
+/** A downloadable file attached to an item. */
+export interface FileAttachment {
+  id: number;
+  item_id: number;
+  filename: string;
+  kind: FileKind;
+  description: string | null;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+  url: string;
 }
 
 export interface ItemSummary {
@@ -147,6 +179,7 @@ export interface ItemDetail extends ItemSummary {
   last_tested_on: string | null;
   attributes: Record<string, unknown>;
   photos: Photo[];
+  files: FileAttachment[];
 }
 
 export interface Page<T> {

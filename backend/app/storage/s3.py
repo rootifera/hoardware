@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import BinaryIO
 
 import boto3
 from botocore.config import Config
@@ -52,6 +53,14 @@ class S3Storage(Storage):
         try:
             self.client.put_object(
                 Bucket=self.bucket, Key=self._key(key), Body=data, ContentType=content_type
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise StorageError(str(exc)) from exc
+
+    def put_file(self, key: str, fileobj: BinaryIO, content_type: str) -> None:
+        try:
+            self.client.upload_fileobj(
+                fileobj, self.bucket, self._key(key), ExtraArgs={"ContentType": content_type}
             )
         except (BotoCoreError, ClientError) as exc:
             raise StorageError(str(exc)) from exc

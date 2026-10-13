@@ -20,6 +20,8 @@ import type {
   Page,
   Photo,
   PhotoRole,
+  FileAttachment,
+  FileKind,
   ReferenceCandidate,
   ReferenceDetail,
   ReferenceSourceStatus,
@@ -166,8 +168,19 @@ export const api = {
   deletePhoto: (itemId: number, photoId: number) =>
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
 
+  uploadFiles: (itemId: number, files: File[], kind: FileKind = "other") => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    form.append("kind", kind);
+    return request<FileAttachment[]>(`/items/${itemId}/files`, { method: "POST", body: form });
+  },
+  updateFile: (itemId: number, fileId: number, body: { kind?: FileKind; description?: string | null; filename?: string }) =>
+    request<FileAttachment>(`/items/${itemId}/files/${fileId}`, json("PATCH", body)),
+  deleteFile: (itemId: number, fileId: number) => request<void>(`/items/${itemId}/files/${fileId}`, { method: "DELETE" }),
+
   referenceSources: () => request<ReferenceSourceStatus[]>("/reference-sources"),
-  referenceSuggestions: (q: string) => request<ReferenceCandidate[]>(`/reference-suggestions?${new URLSearchParams({ q, limit: "5" })}`),
+  referenceSuggestions: (q: string, kind?: string | null) =>
+    request<ReferenceCandidate[]>(`/reference-suggestions?${new URLSearchParams({ q, limit: "6", ...(kind ? { kind } : {}) })}`),
   referenceCandidates: (itemId: number) => request<ReferenceCandidate[]>(`/items/${itemId}/reference-candidates`),
   searchReference: (q: string, cursor?: string | null) => {
     const p = new URLSearchParams({ limit: "20" });

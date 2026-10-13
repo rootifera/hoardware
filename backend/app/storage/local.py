@@ -1,6 +1,9 @@
+import io
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 from app.storage.base import ObjectNotFound, Storage, StorageError
 
@@ -24,14 +27,21 @@ class LocalStorage(Storage):
         return path
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.put_file(key, io.BytesIO(data), content_type)
+
+    def put_file(self, key: str, fileobj: BinaryIO, content_type: str) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        try:
+            with open(tmp, "wb") as fh:
+                shutil.copyfileobj(fileobj, fh, CHUNK)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            raise StorageError(str(exc)) from exc
 
     def open(self, key: str) -> tuple[Iterator[bytes], int]:
         path = self._path(key)

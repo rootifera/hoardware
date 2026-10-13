@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Identity,
+    Index,
     Integer,
     Text,
     func,
@@ -23,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.enums import Condition, IdentificationConfidence, PhotoRole, TestStatus, sql_in
+from app.enums import Condition, FileKind, IdentificationConfidence, PhotoRole, TestStatus, sql_in
 
 
 class Base(DeclarativeBase):
@@ -142,6 +143,26 @@ class Photo(Base):
     role: Mapped[str] = mapped_column(Text, server_default=PhotoRole.OTHER.value)
     caption: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ItemFile(Base):
+    """A downloadable file attached to an item: manual, driver, tool, firmware…"""
+
+    __tablename__ = "item_files"
+    __table_args__ = (
+        CheckConstraint(f"kind IN ({sql_in(FileKind)})", name="ck_item_files_kind"),
+        Index("ix_item_files_item", "item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"))
+    storage_key: Mapped[str] = mapped_column(Text, unique=True)
+    filename: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(Text, server_default=FileKind.OTHER.value)
+    description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -7,8 +7,10 @@ __all__ = ["ObjectNotFound", "Storage", "StorageError", "build_storage", "get_st
 
 
 def build_storage(name: str) -> Storage:
-    """Construct a storage backend by name (``local`` or ``s3``)."""
+    """Construct a storage backend by name (``local``, ``s3`` or ``auto``)."""
     settings = get_settings()
+    if name == "auto":
+        name = "s3" if settings.s3_bucket else "local"
     if name == "local":
         from app.storage.local import LocalStorage
 

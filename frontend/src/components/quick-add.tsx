@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImagePlus, Loader2, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
@@ -67,6 +68,13 @@ function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** The kind of reference record that describes a category, if any. */
+function refKindOf(categoryName: string): "cpu" | "gpu" | null {
+  if (/cpu|processor/i.test(categoryName)) return "cpu";
+  if (/gpu|vga|graphics|video/i.test(categoryName)) return "gpu";
+  return null;
+}
+
 export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setOpen] = useState(false);
   const [preset, setPreset] = useState<QuickAddPreset | undefined>();
@@ -124,6 +132,7 @@ function QuickAddDialog({
 
 function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories });
   const modelRef = useRef<HTMLInputElement>(null);
 
@@ -133,6 +142,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const [model, setModel] = useState(preset?.model ?? "");
   const [manufacturer, setManufacturer] = useState(preset?.manufacturer ?? "");
   const [partNumber, setPartNumber] = useState(preset?.partNumber ?? "");
+  // The chip on a card or board (graphics, sound, motherboard): not the same thing as the card itself.
+  const [chipset, setChipset] = useState("");
   const [condition, setCondition] = useState<Condition>("Unknown");
   const [testStatus, setTestStatus] = useState<TestStatus>("Untested");
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
@@ -140,7 +151,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const [files, setFiles] = useState<File[]>([]);
   const [copies, setCopies] = useState(1);
   const [position, setPosition] = useState("");
-  // A reference model picked from the suggestions (CPU categories only).
+  // A reference model picked from the suggestions (CPU and graphics categories).
   const [match, setMatch] = useState<ReferenceSummary | null>(null);
   // The dropdown is closed (Esc, or focus left the field) for this typed text; typing again reopens it.
   const [closedFor, setClosedFor] = useState<string | null>(null);
@@ -170,37 +181,53 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // (an S-Spec or ordering code) is, and only exact identifier matches count.
   // Nothing is ever filled in until the user picks a suggestion.
   const categoryName = (categories.data ?? []).find((c) => String(c.id) === category)?.name ?? "";
-  const cpuCategory = /cpu|processor/i.test(categoryName);
+  // Which kind of reference record describes this category (CPUs, graphics cards).
+  const refKind = refKindOf(categoryName);
   const sources = useQuery({ queryKey: ["reference-sources"], queryFn: api.referenceSources, staleTime: 60_000 });
   const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
-  const typed = useDebouncedValue(partNumber.trim().length >= 3 ? partNumber.trim() : model.trim(), 300);
+  const categoryFields = (categories.data ?? []).find((c) => String(c.id) === category)?.fields ?? [];
+  const hasChipsetField = categoryFields.some((f) => f.column === "chipset");
+  // A graphics card is the board (maker + model, e.g. Diamond Viper V770 Ultra); the dataset
+  // describes its chip (RIVA TNT2 Ultra), so the chip is looked up from its own field.
+  const chipLookup = refKind === "gpu";
+  const typed = useDebouncedValue(
+    chipLookup ? chipset.trim() : partNumber.trim().length >= 3 ? partNumber.trim() : model.trim(),
+    300,
+  );
   const looksLikeCode = typed.length >= 4 && /\d/.test(typed) && !/\s{2,}/.test(typed);
-  const wantsSuggestions = typedByUser && hasDataset && match === null && typed.length >= 3 && (cpuCategory || looksLikeCode);
+  const wantsSuggestions = typedByUser && hasDataset && match === null && typed.length >= 3 && (refKind !== null || looksLikeCode);
   const suggestions = useQuery({
-    queryKey: ["reference-suggestions", typed],
-    queryFn: () => api.referenceSuggestions(typed),
+    queryKey: ["reference-suggestions", typed, refKind],
+    queryFn: () => api.referenceSuggestions(typed, refKind),
     enabled: wantsSuggestions,
   });
-  const offered = (suggestions.data ?? []).filter((c) => cpuCategory || c.match_type !== "text");
+  const offered = (suggestions.data ?? []).filter((c) => refKind !== null || c.match_type !== "text");
   const listOpen = wantsSuggestions && offered.length > 0 && closedFor !== typed;
   // The dropdown hangs under the field the text is coming from.
-  const source: "part" | "model" = partNumber.trim().length >= 3 ? "part" : "model";
+  const source: "part" | "model" | "chipset" = chipLookup ? "chipset" : partNumber.trim().length >= 3 ? "part" : "model";
 
   function pick(c: ReferenceCandidate) {
     const r = c.reference;
     setMatch(r);
-    if (r.manufacturer) setManufacturer(r.manufacturer);
-    // The part number is the order code; the S-Spec is saved as its own spec.
-    if (r.part_number) setPartNumber(r.order_code ?? r.part_number);
+    if (r.kind === "gpu") {
+      // The card's own maker, model and part number stay as typed: only the chip is filled in.
+      setChipset(r.display_name);
+      return;
+    }
+    // A graphics record names the chip's vendor, which may not be who made the card:
+    // it only fills an empty manufacturer. A CPU's maker is the record's.
+    if (r.manufacturer && (r.kind === "cpu" || manufacturer.trim() === "")) setManufacturer(r.manufacturer);
+    // The part number is the order code (or a graphics board number); the S-Spec is saved as its own spec.
+    if (r.part_number && (r.kind === "cpu" || partNumber.trim() === "" || partNumber.trim() === typed)) setPartNumber(r.order_code ?? r.part_number);
     // Use the proper name unless the user wrote a real name of their own: an
     // empty model, or one that is just the code they typed, is replaced.
     const current = model.trim().toLowerCase();
     const onlyTheCode = current === "" || current === typed.toLowerCase() || (r.part_number ?? "").toLowerCase().includes(current);
     if (onlyTheCode) setModel(r.display_name);
-    // A CPU record belongs in the CPU category.
-    if (r.kind === "cpu" && !cpuCategory) {
-      const cpu = (categories.data ?? []).find((c2) => /cpu|processor/i.test(c2.name));
-      if (cpu) setCategory(String(cpu.id));
+    // A record belongs in its own category.
+    if (refKindOf(categoryName) !== r.kind) {
+      const own = (categories.data ?? []).find((c2) => refKindOf(c2.name) === r.kind);
+      if (own) setCategory(String(own.id));
     }
   }
 
@@ -208,7 +235,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // Fall back to the first category when nothing (valid) is remembered.
   const effectiveCategory = categoryOptions.some((o) => o.value === category) ? category : (categoryOptions[0]?.value ?? "");
 
-  async function save(addAnother: boolean) {
+  async function save(mode: "close" | "edit" | "another") {
     if (saving) return;
     if (!effectiveCategory) return setError("Choose a category.");
     if (!model.trim()) {
@@ -224,6 +251,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         model: model.trim(),
         manufacturer: manufacturer.trim() || null,
         part_number: partNumber.trim() || null,
+        ...(hasChipsetField && chipset.trim() ? { chipset: chipset.trim() } : {}),
         condition,
         test_status: testStatus,
         notes: notes.trim() || null,
@@ -277,9 +305,10 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           </span>
         ),
       );
-      if (addAnother) {
+      if (mode === "another") {
         setModel("");
         setPartNumber("");
+        setChipset("");
         setNotes("");
         setFiles([]);
         setMatch(null);
@@ -290,6 +319,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         modelRef.current?.focus();
       } else {
         onClose();
+        // Several copies have no single page to open.
+        if (mode === "edit" && item) router.push(`/items/${item.id}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the item.");
@@ -304,7 +335,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       aria-label="Suggestions"
       className="absolute top-full right-0 z-50 mt-1 w-[32rem] max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
     >
-      <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">From the CPU database. Pick one to fill in the details.</p>
+      <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">{refKind === "gpu" ? "Graphics chips. Pick one to fill in the chipset and its specs; your card's name stays as typed." : "From the reference database. Pick one to fill in the details."}</p>
       <div className="max-h-64 overflow-y-auto p-1">
         {offered.map((c) => (
           <button
@@ -318,7 +349,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
                 {[c.reference.manufacturer, c.reference.display_name].filter(Boolean).join(" ")}
               </span>
               <span className="flex shrink-0 items-center gap-2 font-mono text-xs text-muted-foreground">
-                {c.reference.order_code ?? c.reference.part_number ?? c.reference.model}
+                {c.reference.kind === "gpu" ? c.reference.part_number : (c.reference.order_code ?? c.reference.part_number ?? c.reference.model)}
                 {c.reference.s_spec && (
                   <span className="rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground" title="S-Spec: the code printed on the chip">
                     {c.reference.s_spec}
@@ -355,7 +386,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        void save(true);
+        void save("another");
       }}
     >
       <div className="grid gap-4 sm:grid-cols-[11rem_minmax(0,1fr)]">
@@ -368,6 +399,30 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             onChange={setCategory}
             options={categoryOptions}
             placeholder="Category"
+          />
+        </div>
+        <div className="relative grid gap-1.5" {...dropdownKeys}>
+          <Label htmlFor="qa-pn">Part number</Label>
+          <Input
+            id="qa-pn"
+            autoComplete="off"
+            value={partNumber}
+            onChange={(e) => {
+              setPartNumber(e.target.value);
+              setTypedByUser(true);
+            }}
+          />
+          {source === "part" && dropdown}
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="qa-manufacturer">Manufacturer</Label>
+          <Input
+            id="qa-manufacturer"
+            autoComplete="off"
+            value={manufacturer}
+            onChange={(e) => setManufacturer(e.target.value)}
           />
         </div>
         <div className="relative grid gap-1.5" {...dropdownKeys}>
@@ -387,37 +442,30 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           {source === "model" && dropdown}
         </div>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label htmlFor="qa-manufacturer">Manufacturer</Label>
-          <Input
-            id="qa-manufacturer"
-            autoComplete="off"
-            value={manufacturer}
-            onChange={(e) => setManufacturer(e.target.value)}
-          />
-        </div>
+      {hasChipsetField && (
         <div className="relative grid gap-1.5" {...dropdownKeys}>
-          <Label htmlFor="qa-pn">Part number</Label>
+          <Label htmlFor="qa-chipset">Chipset</Label>
           <Input
-            id="qa-pn"
+            id="qa-chipset"
             autoComplete="off"
-            value={partNumber}
+            placeholder={chipLookup ? "The chip on the card, e.g. TNT2 Ultra: pick it to fill in the chip's specs" : "e.g. Intel 440BX"}
+            value={chipset}
             onChange={(e) => {
-              setPartNumber(e.target.value);
+              setChipset(e.target.value);
               setTypedByUser(true);
+              if (match) setMatch(null);
             }}
           />
-          {source === "part" && dropdown}
+          {source === "chipset" && dropdown}
         </div>
-      </div>
+      )}
       {/* One line of reserved height, so nothing here ever resizes the dialog. */}
       <div className="flex h-6 items-center gap-2 text-sm" aria-live="polite">
         {match ? (
           <>
             <span
               className="min-w-0 flex-1 truncate text-emerald-700 dark:text-emerald-300"
-              title={`From the CPU database: ${match.display_name} · ${match.spec_line}`}
+              title={`From the reference database: ${match.display_name} · ${match.spec_line}`}
             >
               ✓ Specs will be saved with the item{match.spec_line ? <span className="text-muted-foreground"> · {match.spec_line}</span> : null}
             </span>
@@ -535,8 +583,11 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         </p>
       )}
       <DialogFooter>
-        <Button type="button" variant="outline" disabled={saving} onClick={() => void save(false)}>
-          Save &amp; close
+        <Button type="button" variant="outline" disabled={saving} onClick={() => void save("close")}>
+          Save
+        </Button>
+        <Button type="button" variant="outline" disabled={saving} onClick={() => void save("edit")}>
+          Save &amp; edit
         </Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />} Save &amp; add another
