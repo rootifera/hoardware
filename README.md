@@ -43,7 +43,7 @@ Everyday use needs no internet access. (Building the images does.)
 - **Status strip**: above the list, chips show how many items are Untested, Unknown, POST, Full Test or Dead (respecting your other filters); click one to filter.
 - **Test history**: every change of an item's test status is logged automatically with the date and the notes in force at the time, and you can log a test by hand (result, date, what was tested). The item page shows the history and when it was last tested. Items created by CSV import start with no history.
 - **Test status vs condition**: independent. `Unknown` means testing is currently impossible (note why in *Test notes*); `Untested` means not tried yet.
-- **Downloads**: each item has a *Downloads* section for manuals, drivers, firmware/BIOS, tools and datasheets. Drop files on it (up to `MAX_FILE_BYTES`, 250 MB by default); each file gets a kind (guessed from the extension, changeable), a description (version, OS…) and a download link. Files are always sent as attachments, never opened in the browser, and are stored (and streamed) via the same photo storage, S3 when configured.
+- **Downloads**: each item has a *Downloads* section for manuals, drivers, firmware/BIOS, tools and datasheets. Drop files on it (up to `MAX_FILE_BYTES`, 1 GB by default); each file gets a kind (guessed from the extension, changeable), a description (version, OS…) and a download link. Files are always sent as attachments, never opened in the browser, and are stored (and streamed) via the same photo storage, S3 when configured.
 - **Every physical item is its own record** with its own code (`HW-000001`, never reused), so identical parts can differ in location, condition and test result.
 - **Locations**: a tree (`Workshop > Shelf 2 > CPU Box 3`); moving or renaming a location updates everything inside it.
 - **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Copies** = 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
@@ -64,7 +64,7 @@ docker compose run --rm --no-deps backend python -m app.cli hash-password   # pr
 
 **TLS and the proxy** are yours to provide (for example BunkerWeb). Point it at the frontend service (`http://frontend:3000` on the same Docker network, or `http://<host>:3100` via `FRONTEND_PORT`) and never at the backend, which is not published. The cookie is marked `Secure` when the proxy sends `X-Forwarded-Proto: https` (most do). Check these on the proxy:
 
-- the upload limit: photos are up to `MAX_UPLOAD_BYTES` (20 MB) and downloads up to `MAX_FILE_BYTES` (250 MB), so the proxy's maximum request body (BunkerWeb: `MAX_CLIENT_SIZE`) has to allow that, or large files fail with a 413 before reaching the app;
+- the upload limit: photos are up to `MAX_UPLOAD_BYTES` (20 MB) and downloads up to `MAX_FILE_BYTES` (1 GB), so the proxy's maximum request body (BunkerWeb: `MAX_CLIENT_SIZE`) has to allow that, or large files fail with a 413 before reaching the app;
 - websockets are not used, and no special timeouts are needed beyond the usual for large uploads;
 - set a real `POSTGRES_PASSWORD` in `.env` before the first start (the database is only reachable inside the Compose network, but there is no reason to keep the default).
 

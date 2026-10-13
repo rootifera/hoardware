@@ -57,6 +57,19 @@ def cmd_storage_gc(_: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _copy_object(chunks, target, key: str) -> int:
+    """Store the chunks under key without holding the whole object in memory (files can be 1 GB)."""
+    import tempfile
+
+    with tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024) as buffer:
+        for chunk in chunks:
+            buffer.write(chunk)
+        size = buffer.tell()
+        buffer.seek(0)
+        target.put_file(key, buffer, "application/octet-stream")
+    return size
+
+
 def cmd_migrate_photos(args: argparse.Namespace) -> int:
     if args.source == args.target:
         print("source and target must differ", file=sys.stderr)
@@ -73,9 +86,7 @@ def cmd_migrate_photos(args: argparse.Namespace) -> int:
                         skipped += 1
                     else:
                         chunks, size = source.open(key)
-                        data = b"".join(chunks)
-                        target.put(key, data, "application/octet-stream")
-                        if len(data) != size:
+                        if _copy_object(chunks, target, key) != size:
                             raise StorageError(f"size mismatch for {key}")
                         copied += 1
                     if args.delete_source:
@@ -125,7 +136,7 @@ def cmd_relayout_storage(args: argparse.Namespace) -> int:
             try:
                 if not target.exists(new):
                     chunks, _size = source.open(old)
-                    target.put(new, b"".join(chunks), "application/octet-stream")
+                    _copy_object(chunks, target, new)
                 if new != old:
                     setattr(row, attr, new)
                     session.commit()

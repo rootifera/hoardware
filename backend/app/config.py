@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     storage_backend: Literal["auto", "local", "s3"] = "auto"
     photos_dir: Path = Path("/data/photos")
     max_upload_bytes: int = 20 * 1024 * 1024
-    max_file_bytes: int = 250 * 1024 * 1024  # manuals, drivers, tools
+    max_file_bytes: int = 1024 * 1024 * 1024  # manuals, drivers, tools
     max_image_pixels: int = 100_000_000
     thumbnail_size: int = 480
 
