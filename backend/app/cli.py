@@ -150,6 +150,29 @@ def cmd_relayout_storage(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_check_backup_s3(_: argparse.Namespace) -> int:
+    from app.backup import check_backup_s3
+
+    try:
+        check_backup_s3()
+    except Exception as exc:  # any failure means "not usable"
+        print(f"backup destination not usable: {exc}", file=sys.stderr)
+        return 1
+    print("backup destination ok")
+    return 0
+
+
+def cmd_reference_count(args: argparse.Namespace) -> int:
+    """Print how many reference records a source has (0 when never imported)."""
+    from sqlalchemy import func
+
+    from app.models import ReferenceModel
+
+    with SessionLocal() as session:
+        print(session.scalar(select(func.count(ReferenceModel.id)).where(ReferenceModel.source_key == args.source)) or 0)
+    return 0
+
+
 def cmd_hash_password(args: argparse.Namespace) -> int:
     import getpass
 
@@ -213,6 +236,11 @@ def main(argv: list[str] | None = None) -> int:
     migrate.add_argument("--to", dest="target", choices=["local", "s3"], required=True)
     migrate.add_argument("--delete-source", action="store_true", help="remove each object from the source after copying")
     migrate.set_defaults(func=cmd_migrate_photos)
+
+    sub.add_parser("check-backup-s3", help="check the S3 backup destination is reachable").set_defaults(func=cmd_check_backup_s3)
+    rc = sub.add_parser("reference-count", help="print how many records a reference source has")
+    rc.add_argument("source", choices=sorted(ADAPTERS))
+    rc.set_defaults(func=cmd_reference_count)
 
     hp = sub.add_parser("hash-password", help="make an AUTH_PASSWORD_HASH for .env")
     hp.add_argument("--password-stdin", action="store_true", help="read the password from the first line of stdin")

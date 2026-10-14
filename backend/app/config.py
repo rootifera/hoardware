@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="ignore")
+    # An empty variable (KEY= in .env) means "not set", so optional values can be left blank.
+    model_config = SettingsConfigDict(extra="ignore", env_ignore_empty=True)
 
     # IANA timezone used for "today" (verified/tested dates). Set TZ in .env.
     tz: str = "UTC"
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
     backup_s3_region: str | None = None
     backup_s3_access_key_id: str | None = None
     backup_s3_secret_access_key: str | None = None
+    backup_s3_force_path_style: bool | None = None  # None = same as S3_FORCE_PATH_STYLE
 
 
 @lru_cache

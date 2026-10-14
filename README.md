@@ -14,7 +14,18 @@ Only the frontend publishes a port. The backend API and database exist solely on
 
 ## Quick start
 
-On a server, `./deploy.sh` does everything: it pulls the latest code, builds the containers, creates `.env` if there is none, and starts the application. The first time it asks for the timezone, the port, the sign-in username and password (stored only as a hash), optionally your S3 details (checked before it carries on) and whether to take daily backups; the database password is generated. Later runs just update and restart. `./deploy.sh --no-cache` rebuilds the images from scratch. An existing `.env` is never touched.
+On a server, `./deploy.sh` does everything: it pulls the latest code, builds the containers, creates `.env` if there is none, starts the application, and downloads and imports the CPU and GPU reference data.
+
+The first time it asks for the timezone, the port, the sign-in username and password (stored only as a hash), where to keep photos and downloads (a local volume, or S3 with an optional folder, checked before it carries on), whether to take daily backups and where to copy them (local volume only, the same S3 bucket, or a **different** S3 bucket or service, which is the safest), and whether to fetch the reference data. The database password is generated. An existing `.env` is never touched.
+
+| Command | |
+| --- | --- |
+| `./deploy.sh` | update and restart; the reference data is refreshed when it changed upstream |
+| `./deploy.sh --no-cache` | rebuild the images from scratch |
+| `./deploy.sh --reset-password` | choose a new sign-in password (and username); signs everyone out |
+| `./deploy.sh --no-data` | skip the reference data step (no internet, or you manage it yourself) |
+
+The reference data (CPU-DB and GPUs-Specs, git-cloned into `./reference-data/`) is imported when it is new, has changed, or is missing from the database; set `REFERENCE_DATA=no` in `.env` to turn the step off for good. A problem with it never stops the deploy.
 
 By hand:
 

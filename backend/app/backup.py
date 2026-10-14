@@ -45,9 +45,20 @@ def _s3(settings: Settings):
         region=settings.backup_s3_region or settings.s3_region,
         access_key_id=settings.backup_s3_access_key_id or settings.s3_access_key_id,
         secret_access_key=settings.backup_s3_secret_access_key or settings.s3_secret_access_key,
-        force_path_style=settings.s3_force_path_style,
+        force_path_style=(
+            settings.s3_force_path_style if settings.backup_s3_force_path_style is None else settings.backup_s3_force_path_style
+        ),
     )
     return client, settings.backup_s3_bucket, settings.backup_s3_prefix
+
+
+def check_backup_s3() -> None:
+    """Raise if the S3 backup destination is configured but not reachable (used by deploy.sh)."""
+    found = _s3(get_settings())
+    if found is None:
+        raise RuntimeError("BACKUP_S3_BUCKET is not set")
+    client, bucket, _prefix = found
+    client.head_bucket(Bucket=bucket)
 
 
 def create_backup() -> list[BackupInfo]:
