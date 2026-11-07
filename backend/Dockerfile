@@ -31,6 +31,8 @@ COPY app ./app
 COPY tests ./tests
 COPY pytest.ini .
 COPY docker-entrypoint.sh .
+# The installed version, from the repository root (a named build context, see docker-compose.yml).
+COPY --from=root version.json ./version.json
 
 USER app
 EXPOSE 8000

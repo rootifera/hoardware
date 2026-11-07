@@ -53,6 +53,14 @@ def health(response: Response):
     }
 
 
+@router.get("/version", tags=["health"])
+def get_version():
+    """The installed version, and the newer one if the git repository has published one."""
+    from app import version
+
+    return version.status()
+
+
 @router.get("/manufacturers", response_model=list[str], tags=["items"])
 def list_manufacturers(
     session: SessionDep,

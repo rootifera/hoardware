@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     # auto: Secure cookie when the request came in over https (X-Forwarded-Proto), else not.
     auth_cookie_secure: Literal["auto", "always", "never"] = "auto"
 
+    # Version and update check. The installed version is read from version.json (baked into the
+    # image); the newest one from the same file in the git repository. A private repository needs a
+    # read-only token. VERSION_CHECK_URL cannot be blanked (empty counts as unset): use "off" to disable.
+    version_file: Path | None = None
+    version_check_url: str | None = "https://raw.githubusercontent.com/rootifera/hoardware/main/version.json"
+    version_check_token: str | None = None
+    version_check_interval_hours: float = 6
+
     database_url: str = "postgresql+psycopg://hoardware:hoardware@db:5432/hoardware"
 
     # Photos

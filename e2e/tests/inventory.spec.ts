@@ -22,6 +22,16 @@ test.afterAll(async ({ request }) => {
   await cleanup(request);
 });
 
+/** Choose a location in the open location picker. The result list refreshes as the search settles, so
+ *  a click can land on a row that is replaced a moment later: repeat until the picker has closed. */
+async function chooseLocation(page: import("@playwright/test").Page, search: string, name: RegExp) {
+  await page.getByPlaceholder(/Search locations/).fill(search);
+  await expect(async () => {
+    await page.getByRole("button", { name }).click({ timeout: 3000 });
+    await expect(page.getByPlaceholder(/Search locations/)).toHaveCount(0, { timeout: 1500 });
+  }).toPass({ timeout: 15_000 });
+}
+
 async function trackByModel(request: APIRequestContext, model: string) {
   const page = await (await request.get(`/api/v1/items?q=${encodeURIComponent(model)}`)).json();
   for (const item of page.items) created.push(item.id);
@@ -170,8 +180,7 @@ test("Ten identical CPUs sit at ten exact positions in one location", async ({ p
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(model);
   await qa.getByLabel("Location").click();
-  await page.getByPlaceholder(/Search locations/).fill(`cpu tray ${RUN}`);
-  await page.getByRole("button", { name: new RegExp(`^CPU Tray ${RUN}`) }).click();
+  await chooseLocation(page, `cpu tray ${RUN}`, new RegExp(`^CPU Tray ${RUN}`));
   // The empty tray offers position 1 as the next free spot.
   await expect(qa.getByLabel("Position")).toHaveAttribute("placeholder", "next: 1");
   await qa.getByLabel("Position").fill("1");
@@ -235,8 +244,7 @@ test("Bulk actions: range-select, set a status, then move with positions", async
   await bar.getByRole("button", { name: "Move…" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Choose the destination" }).click();
-  await page.getByPlaceholder(/Search locations/).fill(`bulk b ${RUN}`);
-  await page.getByRole("button", { name: new RegExp(`^Bulk B ${RUN}`) }).click();
+  await chooseLocation(page, `bulk b ${RUN}`, new RegExp(`^Bulk B ${RUN}`));
   await dialog.getByLabel(/Number on after the last one/).check();
   await expect(dialog.getByText("4 items will move.")).toBeVisible();
   await dialog.getByRole("button", { name: "Move", exact: true }).click();
@@ -1089,4 +1097,30 @@ test("Quick add: a lookup box that appears late never takes over what you are ty
   await page.keyboard.type("Typing while it loads");
   await expect(model).toHaveValue("Typing while it loads");
   await expect(qa.getByLabel(/Look up in the CPU database/)).toHaveValue("");
+});
+
+test("The version sits quietly in a corner, and an update shows as a small pill", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  const tag = page.getByText(/^Hoardware \d+\.\d+\.\d+/);
+  await expect(tag).toBeVisible();
+  const box = await tag.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(box!.x).toBeLessThan(80);
+  expect(box!.y).toBeGreaterThan(viewport.height - 60);
+  expect(box!.width).toBeLessThan(260); // small, not a banner
+
+  // The repository publishes a newer version: the tag becomes an "update available" pill.
+  await page.route("**/api/v1/version", async (route) => {
+    const real = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...real, update: { app_name: "Hoardware", version: "9.9.9", build_name: "Basalt", build_time: 1900000000 } } });
+  });
+  await page.reload();
+  const pill = page.getByRole("button", { name: "Update available: version 9.9.9" });
+  await expect(pill).toBeVisible();
+  await expect(pill).toContainText("9.9.9 available");
+  await pill.click();
+  await expect(page.getByText("A new version is available")).toBeVisible();
+  await expect(page.getByText(/“Basalt”/)).toBeVisible();
+  await expect(page.getByText("./deploy.sh")).toBeVisible();
 });

@@ -8,6 +8,7 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { AUTH_KEY } from "@/components/auth-gate";
 import { useQuickAdd } from "@/components/quick-add";
+import { VersionTag } from "@/components/version-tag";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
@@ -162,6 +163,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </dl>
         </DialogContent>
       </Dialog>
+      <VersionTag />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 print:max-w-none print:p-0">{children}</main>
     </div>
   );

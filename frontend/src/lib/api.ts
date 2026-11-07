@@ -31,6 +31,17 @@ import type {
 // Everything goes through the Next.js proxy; the backend is never contacted
 // directly from the browser.
 const BASE = "/api/v1";
+export interface VersionRelease {
+  app_name: string;
+  version: string;
+  build_name: string | null;
+  build_time: number | null;
+}
+export interface VersionInfo extends VersionRelease {
+  /** The newer release published in the git repository, if there is one. */
+  update: VersionRelease | null;
+  check: { enabled: boolean; checked_at: number | null; error: string | null };
+}
 export const UNAUTHORIZED_EVENT = "hoardware:unauthorized";
 
 export interface AuthStatus {
@@ -179,6 +190,7 @@ export const api = {
   deletePhoto: (itemId: number, photoId: number) =>
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
 
+  version: () => request<VersionInfo>("/version"),
   health: () =>
     request<{
       status: string;

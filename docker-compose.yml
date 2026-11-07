@@ -6,6 +6,12 @@
 # Only the frontend publishes a port. The backend is reachable solely on the
 # internal network, through the Next.js proxy at /api/*.
 
+# The backend image also contains version.json from the repository root.
+x-backend-build: &backend-build
+  context: ./backend
+  additional_contexts:
+    root: .
+
 x-backend-env: &backend-env
   TZ: ${TZ:-UTC}
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-hoardware}:${POSTGRES_PASSWORD:-hoardware}@db:5432/${POSTGRES_DB:-hoardware}
@@ -33,6 +39,8 @@ x-backend-env: &backend-env
   BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
   BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
   BACKUP_S3_FORCE_PATH_STYLE: ${BACKUP_S3_FORCE_PATH_STYLE:-}
+  VERSION_CHECK_URL: ${VERSION_CHECK_URL:-}
+  VERSION_CHECK_TOKEN: ${VERSION_CHECK_TOKEN:-}
   BACKUP_EXPECTED: ${BACKUP_EXPECTED:-}
   BACKUP_NOTIFY_URL: ${BACKUP_NOTIFY_URL:-}
   BACKUP_NOTIFY_FORMAT: ${BACKUP_NOTIFY_FORMAT:-}
@@ -55,7 +63,7 @@ services:
       retries: 12
 
   backend:
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     environment: *backend-env
     volumes:
@@ -87,7 +95,7 @@ services:
   # Scheduled pg_dump backups. Enable with: docker compose --profile backup up -d
   backup:
     profiles: ["backup"]
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     command: ["python", "-m", "app.cli", "backup-loop"]
     environment: *backend-env

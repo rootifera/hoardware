@@ -62,6 +62,20 @@ Everyday use needs no internet access. (Building the images does.)
 - **Bulk actions**: tick rows (shift-click selects a range, or *Select all N matching* for everything the filters match) and a bar appears above the list and stays in view while you scroll: set the test status, condition, category or test notes, mark **Verified**, **Move…** to a location, **Export** the selected items as a CSV, or **Delete…** them (with their photos and files; a large deletion has to be confirmed by typing *delete*). When moving you choose what happens to positions: clear them, number on after the last one in the destination, or keep them (refused if any would clash, with a count shown before you commit). On a location's page, **Move all items…** moves everything out of it.
 - **CSV export and import**: the **CSV** button exports the current filter (streamed, so it works at any size). **Import** takes a CSV (the export's columns, a template is provided, and friendly header names such as `name`, `p/n` work too), checks every row first and shows the problems by line, and writes nothing until you confirm. It is all-or-nothing unless you tick *Skip rows with errors*; *Create missing categories/locations* fill in what the file refers to. Every row becomes a new item with a new code.
 
+## Versions and updates
+
+`version.json` in the repository root is the single source of truth for the version:
+
+```json
+{ "app_name": "Hoardware", "version": "1.0.0", "build_name": "Malachite", "build_time": 1790617897 }
+```
+
+The installed version is baked into the backend image from this file and shown in small type in the bottom-left corner of every page (hover for the build date). The app also fetches `version.json` from the git repository every 6 hours; when the published version is higher (or the same version with a later `build_time`) the corner text becomes a small amber **"1.1.0 available"** pill that explains how to update (`./deploy.sh`). A failed check never gets in the way: the installed version is still shown, and the log says why it failed.
+
+To publish a release: edit `version.json` (new `version`, a `build_name`, and `build_time` = `date +%s`), commit and push. Installs notice within about six hours.
+
+A **private repository** needs a read-only token for the check, otherwise GitHub answers 404: create a fine-grained personal access token limited to this repository with *Contents: read-only* and put it in `.env` as `VERSION_CHECK_TOKEN` (`deploy.sh` asks for it once). `VERSION_CHECK_URL` defaults to this repository's `main` branch (`deploy.sh` sets it from your checkout); set it to `off` to switch the check off.
+
 ## Login and running behind a reverse proxy
 
 Hoardware has a single-user login. Set a password in `.env` and it is required for everything (the pages, the API, photos and downloads); without one the app is open, and the backend logs a warning at start.
