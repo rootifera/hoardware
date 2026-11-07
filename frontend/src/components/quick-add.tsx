@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, Loader2, X } from "lucide-react";
+import { FileUp, ImagePlus, Loader2, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { formatBytes, guessKind } from "@/components/file-manager";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { OptionInput } from "@/components/option-input";
 import { SimpleSelect } from "@/components/simple-select";
@@ -26,8 +27,11 @@ import { api } from "@/lib/api";
 import {
   CONDITIONS,
   EMPTY_FILTERS,
+  FILE_KINDS,
+  FILE_KIND_LABELS,
   TEST_STATUSES,
   type Condition,
+  type FileKind,
   type ReferenceCandidate,
   type ReferenceSummary,
   type TestStatus,
@@ -139,6 +143,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const router = useRouter();
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories });
   const modelRef = useRef<HTMLInputElement>(null);
+  const lookupRef = useRef<HTMLInputElement>(null);
 
   // Category and location are remembered between additions.
   const [remembered] = useState(readRemembered);
@@ -146,26 +151,27 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const [model, setModel] = useState(preset?.model ?? "");
   const [manufacturer, setManufacturer] = useState(preset?.manufacturer ?? "");
   const [partNumber, setPartNumber] = useState(preset?.partNumber ?? "");
-  // The chip on a card or board (graphics, sound, motherboard): not the same thing as the card itself.
-  const [chipset, setChipset] = useState(preset?.chipset ?? "");
-  // The category's own fields (capacity, speed, interface…): by lower-cased field name, and
-  // "col:<column>" for the fields kept in item columns (chipset maker, revision).
-  const [specs, setSpecs] = useState<Record<string, string>>(() =>
-    Object.fromEntries(Object.entries(preset?.specs ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
-  );
+  // The category's own fields (capacity, speed, chipset…): by lower-cased field name, and
+  // "col:<column>" for the fields kept in item columns (chipset maker, chipset, revision).
+  const [specs, setSpecs] = useState<Record<string, string>>(() => ({
+    ...Object.fromEntries(Object.entries(preset?.specs ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
+    ...(preset?.chipset ? { "col:chipset": preset.chipset } : {}),
+  }));
   const [condition, setCondition] = useState<Condition>("Unknown");
   const [testStatus, setTestStatus] = useState<TestStatus>("Untested");
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
   const [notes, setNotes] = useState("");
+  const [showNotes, setShowNotes] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  // Manuals, drivers, tools…: each keeps the kind guessed from its name until changed.
+  const [attachments, setAttachments] = useState<{ file: File; kind: FileKind }[]>([]);
   const [copies, setCopies] = useState(1);
   const [position, setPosition] = useState("");
-  // A reference model picked from the suggestions (CPU and graphics categories).
+  // A reference record picked from the database lookup (CPU and graphics categories).
   const [match, setMatch] = useState<ReferenceSummary | null>(null);
-  // The dropdown is closed (Esc, or focus left the field) for this typed text; typing again reopens it.
+  const [lookupText, setLookupText] = useState("");
+  // The result list is closed (Esc, or focus left the box) for this text; typing again reopens it.
   const [closedFor, setClosedFor] = useState<string | null>(null);
-  // Suggestions are for what the user types, never for values that arrived pre-filled.
-  const [typedByUser, setTypedByUser] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -185,46 +191,44 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     enabled: model.trim().length >= 3,
   });
 
-  // Suggestions from an imported reference dataset. In a CPU category anything
-  // typed is looked up; elsewhere only something that looks like a chip code
-  // (an S-Spec or ordering code) is, and only exact identifier matches count.
-  // Nothing is ever filled in until the user picks a suggestion.
   const categoryOptions = (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }));
   // Fall back to the first category when nothing (valid) is remembered: the id saved from an
   // earlier session may no longer exist. Everything below must use this one, not the raw state.
   const effectiveCategory = categoryOptions.some((o) => o.value === category) ? category : (categoryOptions[0]?.value ?? "");
   const categoryName = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.name ?? "";
-  // Which kind of reference record describes this category (CPUs, graphics cards).
+  const specFields = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.fields ?? [];
+  const specKey = (f: { name: string; column: string | null }) => (f.column ? `col:${f.column}` : f.name.toLowerCase());
+
+  // The one box that searches an imported reference database. It exists only for categories
+  // that have one (CPUs, graphics cards) and only when a dataset has been imported.
+  // Nothing in the form changes until a result is picked.
   const refKind = refKindOf(categoryName);
   const sources = useQuery({ queryKey: ["reference-sources"], queryFn: api.referenceSources, staleTime: 60_000 });
   const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
-  const categoryFields = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.fields ?? [];
-  const hasChipsetField = categoryFields.some((f) => f.column === "chipset");
-  // Everything else the category describes an item with; the chipset has its own field above.
-  const specFields = categoryFields.filter((f) => f.column !== "chipset");
-  const specKey = (f: { name: string; column: string | null }) => (f.column ? `col:${f.column}` : f.name.toLowerCase());
-  // A graphics card is the board (maker + model, e.g. Diamond Viper V770 Ultra); the dataset
-  // describes its chip (RIVA TNT2 Ultra), so the chip is looked up from its own field.
-  const chipLookup = refKind === "gpu";
-  const typed = useDebouncedValue(
-    chipLookup ? chipset.trim() : partNumber.trim().length >= 3 ? partNumber.trim() : model.trim(),
-    300,
-  );
-  const looksLikeCode = typed.length >= 4 && /\d/.test(typed) && !/\s{2,}/.test(typed);
-  const wantsSuggestions = typedByUser && hasDataset && match === null && typed.length >= 3 && (refKind !== null || looksLikeCode);
-  const suggestions = useQuery({
+  const lookupAvailable = refKind !== null && hasDataset;
+  const typed = useDebouncedValue(lookupText.trim(), 250);
+  const wantsResults = lookupAvailable && match === null && typed.length >= 2 && lookupText.trim().length >= 2;
+  const results = useQuery({
     queryKey: ["reference-suggestions", typed, refKind],
     queryFn: () => api.referenceSuggestions(typed, refKind),
-    enabled: wantsSuggestions,
+    enabled: wantsResults,
   });
-  const offered = (suggestions.data ?? []).filter((c) => refKind !== null || c.match_type !== "text");
-  const listOpen = wantsSuggestions && offered.length > 0 && closedFor !== typed;
-  // The dropdown hangs under the field the text is coming from.
-  const source: "part" | "model" | "chipset" = chipLookup ? "chipset" : partNumber.trim().length >= 3 ? "part" : "model";
+  const offered = results.data ?? [];
+  const listOpen = wantsResults && offered.length > 0 && closedFor !== typed;
+  const noResults = wantsResults && results.isSuccess && typed === lookupText.trim() && offered.length === 0;
+
+  // Start in the lookup box when there is one, otherwise in the model box.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (lookupAvailable && (active === document.body || active === modelRef.current) && model === "") lookupRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookupAvailable]);
 
   function pick(c: ReferenceCandidate) {
     const r = c.reference;
+    const was = lookupText.trim().toLowerCase();
     setMatch(r);
+    setLookupText("");
     // Show what the match adds in the form itself, filling only what is still empty.
     void api
       .referenceSnapshot(r.id)
@@ -232,33 +236,26 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         setSpecs((cur) => {
           const next = { ...cur };
           for (const [name, value] of Object.entries(snap.specs)) if (!next[name.toLowerCase()]?.trim()) next[name.toLowerCase()] = value;
-          for (const [column, value] of Object.entries(snap.columns)) if (column !== "chipset" && !next[`col:${column}`]?.trim()) next[`col:${column}`] = value;
+          for (const [column, value] of Object.entries(snap.columns)) if (!next[`col:${column}`]?.trim()) next[`col:${column}`] = value;
           return next;
         }),
       )
       .catch(() => {});
-    if (r.kind === "gpu") {
-      // The card's own maker, model and part number stay as typed: only the chip is filled in.
-      setChipset(r.display_name);
-      return;
-    }
-    // A graphics record names the chip's vendor, which may not be who made the card:
-    // it only fills an empty manufacturer. A CPU's maker is the record's.
+    // A graphics record names the chip's vendor, which may not be who made the card: it only
+    // fills an empty manufacturer, and never the model (the card keeps its own name).
+    // A CPU's maker is the record's.
     if (r.manufacturer && (r.kind === "cpu" || manufacturer.trim() === "")) setManufacturer(r.manufacturer);
     // The part number is the order code (or a graphics board number); the S-Spec is saved as its own spec.
-    if (r.part_number && (r.kind === "cpu" || partNumber.trim() === "" || partNumber.trim() === typed)) setPartNumber(r.order_code ?? r.part_number);
-    // Use the proper name unless the user wrote a real name of their own: an
-    // empty model, or one that is just the code they typed, is replaced.
-    const current = model.trim().toLowerCase();
-    const onlyTheCode = current === "" || current === typed.toLowerCase() || (r.part_number ?? "").toLowerCase().includes(current);
-    if (onlyTheCode) setModel(r.display_name);
-    // A record belongs in its own category.
-    if (refKindOf(categoryName) !== r.kind) {
-      const own = (categories.data ?? []).find((c2) => refKindOf(c2.name) === r.kind);
-      if (own) setCategory(String(own.id));
+    if (r.part_number && (r.kind === "cpu" ? partNumber.trim() === "" || partNumber.trim().toLowerCase() === was : partNumber.trim() === "")) {
+      setPartNumber(r.order_code ?? r.part_number);
+    }
+    if (r.kind === "cpu") {
+      // Use the proper name unless the user wrote a real name of their own.
+      const current = model.trim().toLowerCase();
+      const onlyTheCode = current === "" || current === was || (r.part_number ?? "").toLowerCase().includes(current);
+      if (onlyTheCode) setModel(r.display_name);
     }
   }
-
 
   async function save(mode: "close" | "edit" | "another") {
     if (saving) return;
@@ -287,7 +284,6 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         model: model.trim(),
         manufacturer: manufacturer.trim() || null,
         part_number: partNumber.trim() || null,
-        ...(hasChipsetField && chipset.trim() ? { chipset: chipset.trim() } : {}),
         condition,
         test_status: testStatus,
         notes: notes.trim() || null,
@@ -323,6 +319,17 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           photoNote = ` (photos failed: ${e instanceof Error ? e.message : "upload error"})`;
         }
       }
+      if (item && attachments.length) {
+        try {
+          // One request per kind, so every file keeps its own.
+          for (const kind of FILE_KINDS) {
+            const group = attachments.filter((a) => a.kind === kind).map((a) => a.file);
+            if (group.length) await api.uploadFiles(item.id, group, kind);
+          }
+        } catch (e) {
+          photoNote += ` (files failed: ${e instanceof Error ? e.message : "upload error"}; add them on the item page)`;
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["items"] });
       queryClient.invalidateQueries({ queryKey: ["manufacturers"] });
       queryClient.invalidateQueries({ queryKey: ["next-position"] });
@@ -344,16 +351,17 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       if (mode === "another") {
         setModel("");
         setPartNumber("");
-        setChipset("");
         setSpecs({});
         setNotes("");
+        setShowNotes(false);
         setFiles([]);
+        setAttachments([]);
         setMatch(null);
-        setTypedByUser(false);
+        setLookupText("");
         // Carry on from the next free spot.
         if (start !== null) setPosition(String(start + copies));
         setCopies(1);
-        modelRef.current?.focus();
+        (lookupAvailable ? lookupRef : modelRef).current?.focus();
       } else {
         onClose();
         // Several copies have no single page to open.
@@ -366,13 +374,16 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     }
   }
 
-  const dropdown = listOpen && (
+  const sourceName = refKind === "gpu" ? "graphics chip database" : "CPU database";
+  const results_ = listOpen && (
     <div
       role="group"
       aria-label="Suggestions"
-      className="absolute top-full right-0 z-50 mt-1 w-[32rem] max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+      className="absolute top-full right-0 left-0 z-50 mt-1 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
     >
-      <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">{refKind === "gpu" ? "Graphics chips. Pick one to fill in the chipset and its specs; your card's name stays as typed." : "From the reference database. Pick one to fill in the details."}</p>
+      <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">
+        {refKind === "gpu" ? "Pick the chip: it fills in the chipset and its specs. Your card's own name stays as typed." : "Pick one to fill in the maker, name and specs."}
+      </p>
       <div className="max-h-64 overflow-y-auto p-1">
         {offered.map((c) => (
           <button
@@ -400,8 +411,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       </div>
     </div>
   );
-  // Esc closes just the dropdown; the arrow key moves from the field into it; leaving it closes it.
-  const dropdownKeys = {
+  // Esc closes just the result list; the arrow key moves from the box into it; leaving it closes it.
+  const listKeys = {
     onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!listOpen) return;
       if (e.key === "Escape") {
@@ -433,72 +444,111 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             id="qa-category"
             className="w-full"
             value={effectiveCategory}
-            onChange={setCategory}
+            onChange={(v) => {
+              setCategory(v);
+              setMatch(null);
+              setLookupText("");
+            }}
             options={categoryOptions}
             placeholder="Category"
           />
         </div>
-        <div className="relative grid gap-1.5" {...dropdownKeys}>
+        <div className="grid gap-1.5">
           <Label htmlFor="qa-pn">Part number</Label>
-          <Input
-            id="qa-pn"
-            autoComplete="off"
-            value={partNumber}
-            onChange={(e) => {
-              setPartNumber(e.target.value);
-              setTypedByUser(true);
-            }}
-          />
-          {source === "part" && dropdown}
+          <Input id="qa-pn" autoComplete="off" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} />
         </div>
       </div>
+
+      {lookupAvailable && (
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5 rounded-lg border bg-muted/40 p-3" {...listKeys}>
+          <Label htmlFor="qa-lookup" className="gap-1.5">
+            <Search className="size-3.5" /> Look up in the {sourceName}
+          </Label>
+          <div className="relative">
+            {match ? (
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-emerald-600/40 bg-background px-2.5 text-sm" aria-live="polite">
+                <span
+                  className="min-w-0 flex-1 truncate"
+                  title={`${[match.manufacturer, match.display_name].filter(Boolean).join(" ")} · ${match.spec_line}`}
+                >
+                  <span className="text-emerald-700 dark:text-emerald-300">✓ </span>
+                  <span className="font-medium">{[match.manufacturer, match.display_name].filter(Boolean).join(" ")}</span>
+                  {match.spec_line ? <span className="text-muted-foreground"> · {match.spec_line}</span> : null}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Remove the match"
+                  onClick={() => {
+                    setMatch(null);
+                    setTimeout(() => lookupRef.current?.focus(), 0);
+                  }}
+                >
+                  <X />
+                </Button>
+              </div>
+            ) : (
+              <Input
+                id="qa-lookup"
+                ref={lookupRef}
+                className="h-9"
+                autoComplete="off"
+                placeholder={
+                  refKind === "gpu" ? "Chip or card name, e.g. TNT2 Ultra, Voodoo3 3000, Rage Pro" : "S-Spec, part number or name, e.g. SL32A, Celeron 300A"
+                }
+                value={lookupText}
+                onChange={(e) => setLookupText(e.target.value)}
+              />
+            )}
+            {results_}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {match
+              ? "Its specs are filled in below and saved with the item. Everything stays editable."
+              : noResults
+                ? "Nothing found. You can fill the details in by hand."
+                : refKind === "gpu"
+                  ? "Finds the chip on the card and fills its specs. Nothing changes until you pick a result."
+                  : "Fills in the maker, name and specs. Nothing changes until you pick a result."}
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="qa-manufacturer">Manufacturer</Label>
-          <Input
-            id="qa-manufacturer"
-            autoComplete="off"
-            value={manufacturer}
-            onChange={(e) => setManufacturer(e.target.value)}
-          />
+          <div className="flex h-[1.125rem] items-center">
+            <Label htmlFor="qa-manufacturer">Manufacturer</Label>
+          </div>
+          <Input id="qa-manufacturer" autoComplete="off" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
         </div>
-        <div className="relative grid gap-1.5" {...dropdownKeys}>
-          <Label htmlFor="qa-model">Model / description</Label>
+        <div className="grid gap-1.5">
+          <div className="flex h-[1.125rem] items-center justify-between gap-2">
+            <Label htmlFor="qa-model">Model / description</Label>
+            {model.trim().length >= 3 && (existing.data ?? 0) > 0 && (
+              <span className="truncate text-xs text-muted-foreground">
+                You already have {existing.data!.toLocaleString()} ·{" "}
+                <Link className="underline" href={`/?q=${encodeURIComponent(lookup)}`} target="_blank">
+                  view
+                </Link>
+              </span>
+            )}
+          </div>
           <Input
             id="qa-model"
             ref={modelRef}
-            autoFocus
+            autoFocus={!lookupAvailable}
             autoComplete="off"
             placeholder="e.g. Unknown ISA VGA card"
             value={model}
-            onChange={(e) => {
-              setModel(e.target.value);
-              setTypedByUser(true);
-            }}
+            onChange={(e) => setModel(e.target.value)}
           />
-          {source === "model" && dropdown}
         </div>
       </div>
-      {hasChipsetField && (
-        <div className="relative grid gap-1.5" {...dropdownKeys}>
-          <Label htmlFor="qa-chipset">Chipset</Label>
-          <Input
-            id="qa-chipset"
-            autoComplete="off"
-            placeholder={chipLookup ? "The chip on the card, e.g. TNT2 Ultra: pick it to fill in the chip's specs" : "e.g. Intel 440BX"}
-            value={chipset}
-            onChange={(e) => {
-              setChipset(e.target.value);
-              setTypedByUser(true);
-              if (match) setMatch(null);
-            }}
-          />
-          {source === "chipset" && dropdown}
-        </div>
-      )}
+
       {specFields.length > 0 && (
-        <fieldset className="grid gap-2">
-          <legend className="mb-1 text-sm font-medium">{categoryName ? `${categoryName} specifications` : "Specifications"}</legend>
+        <fieldset className="grid gap-2 rounded-lg border p-3">
+          <legend className="px-1 text-sm font-medium">{categoryName ? `${categoryName} specifications` : "Specifications"}</legend>
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
             {specFields.map((f, i) => (
               <div key={`${effectiveCategory}:${f.name}`} className="grid gap-1">
@@ -528,29 +578,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           </div>
         </fieldset>
       )}
-      {/* One line of reserved height, so nothing here ever resizes the dialog. */}
-      <div className="flex h-6 items-center gap-2 text-sm" aria-live="polite">
-        {match ? (
-          <>
-            <span
-              className="min-w-0 flex-1 truncate text-emerald-700 dark:text-emerald-300"
-              title={`From the reference database: ${match.display_name} · ${match.spec_line}`}
-            >
-              ✓ Specs will be saved with the item{match.spec_line ? <span className="text-muted-foreground"> · {match.spec_line}</span> : null}
-            </span>
-            <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove the match" onClick={() => setMatch(null)}>
-              <X />
-            </Button>
-          </>
-        ) : model.trim().length >= 3 && (existing.data ?? 0) > 0 ? (
-          <span className="truncate text-xs text-muted-foreground">
-            You already have {existing.data!.toLocaleString()} matching item{existing.data === 1 ? "" : "s"}.{" "}
-            <Link className="underline" href={`/?q=${encodeURIComponent(lookup)}`} target="_blank">
-              View
-            </Link>
-          </span>
-        ) : null}
-      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="qa-condition">Condition</Label>
@@ -586,7 +614,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           />
         </div>
         <div className="grid gap-1.5">
-          <div className="flex h-5 items-center justify-between">
+          <div className="flex h-[1.125rem] items-center justify-between">
             <Label htmlFor="qa-position">Position</Label>
             {location && nextFree.data !== undefined && position === "" && (
               <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setPosition(String(nextFree.data))}>
@@ -605,34 +633,31 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           />
         </div>
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="qa-notes">Notes</Label>
-        <Textarea id="qa-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-      </div>
-      <div className="grid gap-2 rounded-lg border border-dashed p-3">
-        <div className="flex flex-wrap items-center gap-3">
+
+      {/* The rarely needed extras share one quiet row. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4">
+        <div className="flex items-center gap-2">
           <Label htmlFor="qa-copies">Copies</Label>
           <Input
             id="qa-copies"
             type="number"
             min={1}
             max={200}
-            className="w-20"
+            className="w-16"
             value={copies}
-            onChange={(e) => setCopies(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+            onChange={(e) => {
+              const n = Math.max(1, Math.min(200, Number(e.target.value) || 1));
+              setCopies(n);
+              // Several copies cannot share one photo or file upload: it is added to each afterwards.
+              if (n > 1) {
+                setFiles([]);
+                setAttachments([]);
+              }
+            }}
           />
-          <span className="text-xs text-muted-foreground">
-            {copies > 1
-              ? position.trim() !== "" && Number.isInteger(Number(position))
-                ? `${copies} separate items at positions ${position}–${Number(position) + copies - 1}.`
-                : `${copies} separate items, each with its own code.`
-              : "Identical parts are still separate items."}
-          </span>
         </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={copies > 1} render={<label htmlFor="qa-photos" className="cursor-pointer" />}>
-          <ImagePlus /> Add photos
+        <Button type="button" variant="ghost" size="sm" disabled={copies > 1} render={<label htmlFor="qa-photos" className="cursor-pointer" />}>
+          <ImagePlus /> {files.length ? `${files.length} photo${files.length === 1 ? "" : "s"}` : "Add photos"}
         </Button>
         <input
           id="qa-photos"
@@ -642,10 +667,62 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           className="sr-only"
           onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
         />
-        <span className="text-sm text-muted-foreground">
-          {copies > 1 ? "add photos to each item afterwards" : files.length ? `${files.length} photo${files.length === 1 ? "" : "s"} selected` : "optional"}
+        <Button type="button" variant="ghost" size="sm" disabled={copies > 1} render={<label htmlFor="qa-files" className="cursor-pointer" />}>
+          <FileUp /> Add files
+        </Button>
+        <input
+          id="qa-files"
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []).map((file) => ({ file, kind: guessKind(file.name) }));
+            setAttachments((cur) => [...cur, ...picked]);
+            e.target.value = "";
+          }}
+        />
+        {!showNotes && !notes && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowNotes(true)}>
+            <Plus /> Add notes
+          </Button>
+        )}
+        <span className="min-w-0 text-xs text-muted-foreground">
+          {copies > 1
+            ? position.trim() !== "" && Number.isInteger(Number(position))
+              ? `${copies} separate items at positions ${position}–${Number(position) + copies - 1}. Add photos and files to each afterwards.`
+              : `${copies} separate items, each with its own code. Add photos and files to each afterwards.`
+            : ""}
         </span>
       </div>
+      {attachments.length > 0 && (
+        <ul className="grid gap-1.5" aria-label="Files to attach">
+          {attachments.map((a, i) => (
+            <li key={`${a.file.name}:${i}`} className="grid grid-cols-[minmax(0,1fr)_9.5rem_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm">
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate font-medium">{a.file.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(a.file.size)}</span>
+              </span>
+              <SimpleSelect
+                size="sm"
+                className="w-full"
+                aria-label={`Kind of ${a.file.name}`}
+                value={a.kind}
+                onChange={(kind) => setAttachments((cur) => cur.map((x, idx) => (idx === i ? { ...x, kind: kind as FileKind } : x)))}
+                options={FILE_KINDS.map((k) => ({ value: k, label: FILE_KIND_LABELS[k] }))}
+              />
+              <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${a.file.name}`} onClick={() => setAttachments((cur) => cur.filter((_, idx) => idx !== i))}>
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(showNotes || notes) && (
+        <div className="grid gap-1.5">
+          <Label htmlFor="qa-notes">Notes</Label>
+          <Textarea id="qa-notes" rows={2} autoFocus={showNotes && !notes} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

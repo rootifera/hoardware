@@ -22,10 +22,16 @@ import { FILE_KINDS, FILE_KIND_LABELS, type FileAttachment, type FileKind, type 
 import { cn } from "@/lib/utils";
 
 /** A sensible first guess from the file name; the kind can be changed afterwards. */
-function guessKind(name: string): FileKind {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (["pdf", "chm", "doc", "docx", "txt", "djvu"].includes(ext)) return "manual";
-  if (["rom", "bin", "bio", "fd", "cap", "hex", "wph", "awd"].includes(ext)) return "firmware";
+export function guessKind(name: string): FileKind {
+  const lower = name.toLowerCase();
+  const ext = lower.split(".").pop() ?? "";
+  if (/datasheet|data-sheet|\bspec(ification)?s?\b/.test(lower)) return "datasheet";
+  if (/driver|\binf\b|\bdrv\b/.test(lower)) return "driver";
+  // Flashing utilities are tools; the image itself is firmware.
+  if (/flash|util|tool/.test(lower) && ["exe", "com"].includes(ext)) return "tool";
+  if (/\b(bios|firmware)\b|vbios/.test(lower) || ["rom", "bin", "bio", "fd", "cap", "hex", "wph", "awd"].includes(ext)) return "firmware";
+  if (/manual|guide|handbook|readme|install/.test(lower) || ["pdf", "chm", "doc", "docx", "txt", "djvu"].includes(ext)) return "manual";
+  if (/tool|util|setup|install(er)?\b|diag|benchmark/.test(lower)) return "tool";
   return "other";
 }
 

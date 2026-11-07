@@ -3,6 +3,9 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 // These tests run against a live stack and create their own uniquely named
 // items; everything they create is deleted again in afterAll.
 const RUN = Date.now().toString(36);
+// The one box in Quick add that searches the CPU / graphics databases.
+const CPU_LOOKUP = /Look up in the CPU database/;
+const GPU_LOOKUP = /Look up in the graphics chip database/;
 const created: number[] = [];
 const locationIds: number[] = [];
 
@@ -397,7 +400,7 @@ test("Quick Add warns when you already have matching items", async ({ page, requ
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(model);
-  await expect(qa.getByText("You already have 2 matching items.")).toBeVisible();
+  await expect(qa.getByText(/You already have 2/)).toBeVisible();
   await qa.getByLabel("Model / description").fill(`${model} but different`);
   await expect(qa.getByText(/You already have/)).toHaveCount(0);
 });
@@ -446,7 +449,7 @@ test("Spec names are suggested, and 'Add another like this' prefills Quick Add",
   await expect(qa.getByLabel("Model / description")).toHaveValue(model);
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("Acme");
   await expect(qa.getByLabel("Part number")).toHaveValue("AC-1");
-  await expect(qa.getByText("You already have 1 matching item.")).toBeVisible();
+  await expect(qa.getByText(/You already have 1/)).toBeVisible();
   await qa.getByLabel("Condition").click();
   await page.getByRole("option", { name: "Poor", exact: true }).click();
   await qa.getByRole("button", { name: "Save", exact: true }).click();
@@ -476,12 +479,16 @@ test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
 
-  // Start in the wrong category on purpose: the chip code still finds it.
+  // The lookup box exists only in categories that have a database behind them.
   await qa.getByLabel("Category").click();
   await page.getByRole("option", { name: "RAM", exact: true }).click();
+  await expect(qa.getByLabel(CPU_LOOKUP)).toHaveCount(0);
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "CPU", exact: true }).click();
+  await expect(qa.getByLabel(CPU_LOOKUP)).toBeVisible();
   await page.waitForTimeout(300);
   const before = await qa.boundingBox();
-  await qa.getByLabel("Part number").fill("SL32A");
+  await qa.getByLabel(CPU_LOOKUP).fill("SL32A");
 
   // An exact code shows up as a suggestion, but NOTHING is filled until it is chosen.
   const suggestions = qa.getByRole("group", { name: "Suggestions" });
@@ -492,13 +499,13 @@ test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({
   const list = await suggestions.boundingBox();
   expect(list!.y).toBeGreaterThan(before!.y); // anchored inside the dialog, under the field
   await page.waitForTimeout(800);
-  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByText(/saved with the item/)).toHaveCount(0);
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("");
-  await expect(qa.getByLabel("Part number")).toHaveValue("SL32A");
-  await expect(qa.getByLabel("Category")).toContainText("RAM");
+  await expect(qa.getByLabel("Part number")).toHaveValue("");
+  await expect(qa.getByLabel("Category")).toContainText("CPU");
 
   await suggestions.getByRole("button", { name: /BX80524R300128\s*SL32A/ }).click();
-  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await expect(qa.getByText(/saved with the item/)).toBeVisible();
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel");
   await expect(qa.getByLabel("Part number")).toHaveValue("BX80524R300128");
   await expect(qa.getByLabel("Model / description")).toHaveValue("Celeron 300MHz 128KiB L2");
@@ -546,19 +553,19 @@ test("A pick can be undone, and ignoring the list changes nothing", async ({ pag
   await qa.getByLabel("Category").click();
   await page.getByRole("option", { name: "CPU", exact: true }).click();
 
-  await qa.getByLabel("Part number").fill("SL32A");
+  await qa.getByLabel(CPU_LOOKUP).fill("SL32A");
   const suggestions = qa.getByRole("group", { name: "Suggestions" });
   await suggestions.getByRole("button").first().click();
-  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await expect(qa.getByText(/saved with the item/)).toBeVisible();
   await qa.getByRole("button", { name: "Remove the match" }).click();
-  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByText(/saved with the item/)).toHaveCount(0);
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("Intel"); // the filled-in values stay, now just plain text
 
   // A partial code lists several records; ignoring the list leaves the form as typed.
-  await qa.getByLabel("Part number").fill("A80503");
+  await qa.getByLabel(CPU_LOOKUP).fill("A80503");
   await expect(suggestions).toBeVisible();
   await qa.getByLabel("Model / description").fill("My own name");
-  await expect(qa.getByText(/Specs will be saved with the item/)).toHaveCount(0);
+  await expect(qa.getByText(/saved with the item/)).toHaveCount(0);
   await expect(qa.getByLabel("Model / description")).toHaveValue("My own name");
 });
 
@@ -576,7 +583,7 @@ test("The suggestion dropdown: arrow key, Esc closes only it, and the dialog nev
   await page.waitForTimeout(300);
   const before = await qa.boundingBox();
 
-  await qa.getByLabel("Part number").fill("A80503");
+  await qa.getByLabel(CPU_LOOKUP).fill("A80503");
   const suggestions = qa.getByRole("group", { name: "Suggestions" });
   await expect(suggestions).toBeVisible();
   expect(await qa.boundingBox()).toEqual(before);
@@ -586,12 +593,12 @@ test("The suggestion dropdown: arrow key, Esc closes only it, and the dialog nev
   await expect(suggestions).toHaveCount(0);
   await expect(qa).toBeVisible();
   // Typing more brings it back; the arrow key moves into the list and Enter-ing a row picks it.
-  await qa.getByLabel("Part number").fill("A805031");
+  await qa.getByLabel(CPU_LOOKUP).fill("A805031");
   await expect(suggestions).toBeVisible();
   await page.keyboard.press("ArrowDown");
   await expect(suggestions.getByRole("button").first()).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await expect(qa.getByText(/saved with the item/)).toBeVisible();
   expect(await qa.boundingBox()).toEqual(before);
 
   // The duplicate hint and the position shortcut also leave the size alone.
@@ -601,7 +608,7 @@ test("The suggestion dropdown: arrow key, Esc closes only it, and the dialog nev
 });
 
 
-test("Typing the S-Spec into Model gets a proper name, full specs, and a useful inventory row", async ({ page, request }) => {
+test("Looking up an S-Spec gives a proper name, full specs, and a useful inventory row", async ({ page, request }) => {
   const sources = await (await request.get("/api/v1/reference-sources")).json();
   test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
 
@@ -612,8 +619,7 @@ test("Typing the S-Spec into Model gets a proper name, full specs, and a useful 
   await qa.getByLabel("Category").click();
   await page.getByRole("option", { name: "CPU", exact: true }).click();
 
-  // The code typed into the Model field (not Part number).
-  await qa.getByLabel("Model / description").fill("SL32A");
+  await qa.getByLabel(CPU_LOOKUP).fill("SL32A");
   const suggestions = qa.getByRole("group", { name: "Suggestions" });
   const row = suggestions.getByRole("button", { name: /Celeron 300MHz 128KiB L2/ });
   await expect(row).toBeVisible();
@@ -808,7 +814,7 @@ test("A graphics card keeps its own name; the chipset is looked up separately", 
   await expect(qa.getByRole("group", { name: "Suggestions" })).toHaveCount(0);
 
   const before = await qa.boundingBox();
-  await qa.getByLabel("Chipset", { exact: true }).fill("tnt2 ultra");
+  await qa.getByLabel(GPU_LOOKUP).fill("tnt2 ultra");
   const suggestions = qa.getByRole("group", { name: "Suggestions" });
   await expect(suggestions.getByRole("button", { name: /Riva TNT2 Ultra/ })).toContainText("NV5 · 32 MB SDR · AGP 4x");
   expect(await qa.boundingBox()).toEqual(before);
@@ -816,7 +822,7 @@ test("A graphics card keeps its own name; the chipset is looked up separately", 
   await expect(qa.getByLabel("Chipset", { exact: true })).toHaveValue("Riva TNT2 Ultra");
   await expect(qa.getByLabel("Model / description")).toHaveValue("Viper V770 Ultra");
   await expect(qa.getByLabel("Manufacturer")).toHaveValue("Diamond");
-  await expect(qa.getByText(/Specs will be saved with the item/)).toBeVisible();
+  await expect(qa.getByText(/saved with the item/)).toBeVisible();
   await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
 
@@ -939,4 +945,37 @@ test("Quick add still shows the category's fields when the remembered category n
   await expect(qa.getByLabel("Category")).toContainText("CPU");
   await expect(qa.getByText("CPU specifications")).toBeVisible();
   await expect(qa.getByLabel("Speed", { exact: true })).toBeVisible();
+});
+
+test("Quick add can attach manuals, drivers and tools while adding the item", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(`Attach in add ${RUN}`);
+  await qa.locator("#qa-files").setInputFiles([
+    { name: "Board manual.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 manual") },
+    { name: "vga-driver.zip", mimeType: "application/zip", buffer: Buffer.from("PK driver") },
+    { name: "flash-tool.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ tool") },
+  ]);
+  const list = qa.getByRole("list", { name: "Files to attach" });
+  await expect(list.getByText("Board manual.pdf")).toBeVisible();
+  // The kind is guessed from the name and can be changed per file.
+  await expect(list.getByRole("combobox", { name: "Kind of Board manual.pdf" })).toContainText("Manual");
+  const driver = list.getByRole("combobox", { name: "Kind of vga-driver.zip" });
+  await driver.click();
+  await page.getByRole("option", { name: "Driver", exact: true }).click();
+  const tool = list.getByRole("combobox", { name: "Kind of flash-tool.exe" });
+  await tool.click();
+  await page.getByRole("option", { name: "Tool", exact: true }).click();
+  // A mistaken pick can be removed before saving.
+  await qa.getByRole("button", { name: "Remove flash-tool.exe" }).click();
+  await expect(list.getByText("flash-tool.exe")).toHaveCount(0);
+
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Added HW-\d+/)).toBeVisible();
+  const newest = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Attach in add ${RUN}`)}&limit=1`)).json()).items[0];
+  created.push(newest.id);
+  const files = (await (await request.get(`/api/v1/items/${newest.id}`)).json()).files;
+  expect(files.map((f: { filename: string; kind: string }) => `${f.filename}:${f.kind}`).sort()).toEqual(["Board manual.pdf:manual", "vga-driver.zip:driver"]);
 });
