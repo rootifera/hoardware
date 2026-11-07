@@ -42,7 +42,15 @@ def health(response: Response):
         response.status_code = 503
     # Storage trouble is reported but does not fail the health check: the
     # inventory itself keeps working without photo storage.
-    return {"status": "ok" if db_ok else "error", "database": "ok" if db_ok else "error", "storage": storage}
+    from app.backup import backup_status
+
+    # Backups are reported too, and likewise never fail the check: a late backup needs attention, not a restart.
+    return {
+        "status": "ok" if db_ok else "error",
+        "database": "ok" if db_ok else "error",
+        "storage": storage,
+        "backups": backup_status(),
+    }
 
 
 @router.get("/manufacturers", response_model=list[str], tags=["items"])

@@ -1,5 +1,6 @@
 """Database backups: pg_dump (custom format) to a local directory and/or S3."""
 
+import json
 import logging
 import os
 import re
@@ -59,6 +60,87 @@ def check_backup_s3() -> None:
         raise RuntimeError("BACKUP_S3_BUCKET is not set")
     client, bucket, _prefix = found
     client.head_bucket(Bucket=bucket)
+
+
+STATUS_FILE = ".status.json"
+
+
+def record_result(settings: Settings, error: str | None) -> bool:
+    """Remember the outcome of the latest scheduled backup attempt next to the backups.
+    Returns True if the previous attempt had failed (so a recovery can be announced)."""
+    path = settings.backup_local_dir / STATUS_FILE
+    state: dict = {}
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, ValueError):
+        pass
+    was_failing = bool(state.get("last_error"))
+    now = datetime.now(timezone.utc).isoformat()
+    if error is None:
+        state.update(last_success=now, last_error=None, last_error_at=None)
+    else:
+        state.update(last_error=error[:500], last_error_at=now)
+    try:
+        settings.backup_local_dir.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state))
+        tmp.replace(path)
+    except OSError as exc:
+        log.warning("could not record the backup status: %s", exc)
+    return was_failing
+
+
+def backup_status(settings: Settings | None = None, now: datetime | None = None) -> dict:
+    """What the health check reports about backups. Only judged when scheduled backups are expected."""
+    settings = settings or get_settings()
+    if not settings.backup_expected:
+        return {"status": "off"}
+    now = now or datetime.now(timezone.utc)
+    newest: datetime | None = None
+    if settings.backup_local_dir.is_dir():
+        for path in settings.backup_local_dir.iterdir():
+            if NAME_RE.match(path.name):
+                modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                newest = modified if newest is None or modified > newest else newest
+    state: dict = {}
+    try:
+        state = json.loads((settings.backup_local_dir / STATUS_FILE).read_text())
+    except (OSError, ValueError):
+        pass
+    out: dict = {"status": "ok", "last_backup_at": newest.isoformat() if newest else None}
+    # One missed run plus an hour of grace is tolerated; more than that is a problem.
+    limit_hours = settings.backup_interval_hours * 2 + 1
+    if newest is None:
+        out["status"] = "none"
+    else:
+        age = (now - newest).total_seconds() / 3600
+        out["age_hours"] = round(age, 1)
+        if age > limit_hours:
+            out["status"] = "stale"
+    if state.get("last_error"):
+        out["status"] = "failing"
+        out["error"] = state["last_error"]
+    return out
+
+
+def notify(settings: Settings, message: str) -> None:
+    """Tell the configured webhook (if any). Never raises: a broken webhook must not break backups."""
+    url = settings.backup_notify_url
+    if not url:
+        return
+    import urllib.request
+
+    fmt = settings.backup_notify_format
+    if fmt == "auto":
+        fmt = "text" if "ntfy" in url.lower() else "json"
+    try:
+        if fmt == "text":
+            data, headers = message.encode(), {"Content-Type": "text/plain; charset=utf-8", "Title": "Hoardware backup"}
+        else:
+            data, headers = json.dumps({"text": message, "content": message}).encode(), {"Content-Type": "application/json"}
+        urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers, method="POST"), timeout=10).close()
+    except Exception as exc:
+        log.warning("could not notify %s: %s", url.split("?")[0], exc)
 
 
 def create_backup() -> list[BackupInfo]:

@@ -179,6 +179,12 @@ export const api = {
   deletePhoto: (itemId: number, photoId: number) =>
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
 
+  health: () =>
+    request<{
+      status: string;
+      storage: { status: string; detail?: string };
+      backups: { status: "off" | "ok" | "none" | "stale" | "failing"; last_backup_at?: string | null; age_hours?: number; error?: string };
+    }>("/health"),
   authStatus: () => request<AuthStatus>("/auth/status"),
   login: (username: string, password: string) => request<AuthStatus>("/auth/login", json("POST", { username, password })),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

@@ -17,10 +17,14 @@ test.afterAll(async ({ request }) => {
 });
 
 async function audit(page: Page, where: string, exclude: string[] = []) {
+  // Let dialogs and menus finish fading in: axe would measure half-transparent text.
+  await page.waitForTimeout(400);
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
   for (const selector of exclude) builder = builder.exclude(selector);
   const { violations } = await builder.analyze();
-  const summary = violations.map((v) => `${v.id} [${v.impact}] x${v.nodes.length}: ${v.help} → ${v.nodes[0].target.join(" ")}`);
+  const summary = violations.map(
+    (v) => `${v.id} [${v.impact}] x${v.nodes.length}: ${v.help} → ${v.nodes[0].target.join(" ")}\n      ${v.nodes.slice(0, 3).map((n) => n.html.slice(0, 110) + " " + (n.any[0]?.message ?? "").slice(0, 130)).join("\n      ")}`,
+  );
   expect(summary, `accessibility problems on ${where}`).toEqual([]);
 }
 

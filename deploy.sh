@@ -79,6 +79,9 @@ get_env() { # get_env KEY [default]   (value from .env, quotes removed)
   [ -f .env ] && v="$(grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e "s/^'//" -e "s/'$//" -e 's/^"//' -e 's/"$//')" || true
   printf '%s' "${v:-${2:-}}"
 }
+get_env_file() { # get_env_file KEY   (from the .env being written, quotes removed)
+  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed -e "s/^'//" -e "s/'$//"
+}
 random_secret() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || true; }
 
 # Ask for a new password twice and print its hash line (AUTH_PASSWORD_HASH=...).
@@ -100,7 +103,7 @@ ask_password_hash() {
 # ("S3_" for photos and files, "BACKUP_S3_" for backups). Offers to retry until the bucket
 # is reachable. Leaves the entered values in S3_BUCKET_ENTERED.
 configure_s3() { # configure_s3 PREFIX "check command (python code)"
-  local prefix="$1" check="$2" endpoint region bucket key secret path_style folder
+  local prefix="$1" check="$2" endpoint region bucket key secret path_style
   while :; do
     ask endpoint "  Endpoint URL (empty for AWS S3), e.g. https://s3.example.com" ""
     ask region "  Region" "us-east-1"
@@ -130,10 +133,12 @@ mkdir -p "$(get_env REFERENCE_DATA_DIR ./reference-data)"
 
 # ---------------------------------------------------------------- 1. pull
 step "1/5 Pulling the latest code"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git pull --ff-only || die "git pull failed. Resolve it (local changes or diverged history) and run again."
-else
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   warn "not a git checkout, skipping the pull."
+elif ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+  warn "no branch is checked out (detached HEAD), skipping the pull."
+else
+  git pull --ff-only || die "git pull failed. Resolve it (local changes or diverged history) and run again."
 fi
 
 # ---------------------------------------------------------------- 2. build
@@ -149,6 +154,11 @@ ok "images built"
 step "3/5 Checking .env"
 if [ -f .env ]; then
   ok ".env exists, keeping it as it is"
+  # An install from before backup monitoring: scheduled backups are on, so have the app watch them.
+  if [ "$(get_env COMPOSE_PROFILES)" = backup ] && [ -z "$(get_env BACKUP_EXPECTED)" ]; then
+    set_env BACKUP_EXPECTED yes
+    ok "the app will now warn if scheduled backups stop (BACKUP_EXPECTED=yes added to .env)"
+  fi
   if [ "$RESET_PASSWORD" = 1 ]; then
     [ -t 0 ] || die "--reset-password needs an interactive terminal."
     echo
@@ -216,6 +226,8 @@ else
   echo
   if yes_no "Take a database backup every day?" y; then
     set_env COMPOSE_PROFILES backup
+    # The app warns on screen when backups stop running or fail.
+    set_env BACKUP_EXPECTED yes
     echo "  Backups are always kept in a local Docker volume. Copy them somewhere else too?"
     echo "    1) No, local volume only"
     if [ "$USE_S3" = 1 ]; then
@@ -236,6 +248,14 @@ else
       esac
       warn "enter one of the numbers shown."
     done
+  fi
+
+  if [ "$(get_env_file COMPOSE_PROFILES)" = backup ]; then
+    echo
+    echo "  A message can be sent to a webhook if a scheduled backup fails (Slack, Discord, Mattermost,"
+    echo "  Gotify, or an ntfy topic URL). Leave empty for none: the app still shows a warning on screen."
+    ask NOTIFY_URL "  Webhook URL" ""
+    [ -n "$NOTIFY_URL" ] && set_env BACKUP_NOTIFY_URL "$NOTIFY_URL"
   fi
 
   # Reference data

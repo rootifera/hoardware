@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     backup_s3_access_key_id: str | None = None
     backup_s3_secret_access_key: str | None = None
     backup_s3_force_path_style: bool | None = None  # None = same as S3_FORCE_PATH_STYLE
+    # Scheduled backups are expected to run (set by deploy.sh): the app then reports and warns
+    # when the newest one is too old or the last attempt failed.
+    backup_expected: bool = False
+    # Optional webhook told when a scheduled backup fails (and when it recovers): Slack,
+    # Discord, Mattermost, Gotify... take JSON; ntfy takes plain text ("auto" picks by URL).
+    backup_notify_url: str | None = None
+    backup_notify_format: Literal["auto", "json", "text"] = "auto"
 
 
 @lru_cache

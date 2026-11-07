@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 5 * * 1" # weekly: new vulnerabilities show up without any code change
 
 jobs:
   backend:
@@ -33,12 +35,53 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
 
-  e2e:
-    name: Browser tests (Playwright)
+  security:
+    name: Dependency vulnerabilities
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Frontend (what ships; high and critical fail the build)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Backend
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt
+
+  scripts:
+    name: deploy.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the script
+        run: shellcheck -S warning deploy.sh
+      - name: Deploy from a prepared .env (no questions asked, no reference data)
+        run: |
+          cp .env.example .env
+          sed -i "s/^FRONTEND_PORT=.*/FRONTEND_PORT=3000/" .env
+          ./deploy.sh --no-data
+          curl -fsS http://localhost:3000/api/v1/health
+      - name: Show the logs if something failed
+        if: failure()
+        run: docker compose logs --tail=200
+
+  e2e:
+    name: Browser tests (Chromium, Firefox, WebKit, phone)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    env:
+      # The stack under test has login switched on, so the sign-in flow is tested too.
+      AUTH_PASSWORD: ci-password-12345
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the CPU and GPU reference data
+        run: |
+          mkdir -p reference-data
+          git clone --depth 1 https://github.com/zymos/cpu-db reference-data/cpu-db
+          git clone --depth 1 https://github.com/RonnyMuthomi/GPUs-Specs reference-data/gpus-specs
       - name: Start the whole stack
         run: |
           docker compose -p hoardware up -d --build
@@ -46,6 +89,10 @@ jobs:
             curl -fsS http://localhost:3000/api/v1/health && break
             sleep 2
           done
+      - name: Import the reference data
+        run: |
+          docker compose -p hoardware run --rm --no-deps backend python -m app.cli import-reference cpu-db /reference-data/cpu-db
+          docker compose -p hoardware run --rm --no-deps backend python -m app.cli import-reference gpus-specs /reference-data/gpus-specs
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -54,12 +101,13 @@ jobs:
       - name: Install the Playwright test package
         working-directory: e2e
         run: npm ci
-      - name: Run the browser tests (also runs the accessibility audit)
+      - name: Run the browser tests (also the accessibility audit and the sign-in flow)
         working-directory: e2e
         run: |
           docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
-            -e BASE_URL=http://frontend:3000 \
-            mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test
+            -e BASE_URL=http://frontend:3000 -e E2E_PASSWORD="$AUTH_PASSWORD" \
+            mcr.microsoft.com/playwright:v1.64.0-noble \
+            npx playwright test --project=chromium --project=firefox --project=webkit --project=phone
       - name: Show the logs if something failed
         if: failure()
         run: docker compose -p hoardware logs --tail=200

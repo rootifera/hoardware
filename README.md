@@ -124,6 +124,8 @@ docker compose run --rm --no-deps backend python -m app.cli list-backups
 
 Set `BACKUP_S3_BUCKET` (and optionally `BACKUP_S3_PREFIX`, `BACKUP_S3_ENDPOINT_URL`, `BACKUP_S3_REGION`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`; unset ones fall back to `S3_*`) and every backup is also uploaded to S3. The newest `BACKUP_RETENTION_COUNT` (default 14) are kept on each destination.
 
+**Knowing when backups stop.** With scheduled backups on (`deploy.sh` sets `BACKUP_EXPECTED=yes`), the app watches them: if the newest backup is older than two intervals or the last attempt failed, an amber warning appears at the top of every page, and `/api/v1/health` reports `backups: stale | failing | none` (without failing the health check). Set `BACKUP_NOTIFY_URL` to also get a message when a backup fails and when it works again: a Slack, Discord, Mattermost or Gotify webhook, or an ntfy topic URL (`BACKUP_NOTIFY_FORMAT` picks JSON or plain text, `auto` by default).
+
 Scheduled backups every `BACKUP_INTERVAL_HOURS` (default 24):
 
 ```bash
@@ -201,6 +203,8 @@ cd e2e && npm install
 docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
   -e BASE_URL=http://frontend:3000 mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test
 ```
+
+The browser tests run in Chromium, Firefox, WebKit (Safari's engine) and a phone-sized touch device (`--project=chromium|firefox|webkit|phone`). Set `E2E_PASSWORD` (and `E2E_USER`) when the stack has login switched on. CI also audits the dependencies for known vulnerabilities (`npm audit`, `pip-audit`; weekly as well as on every push), lints `deploy.sh` with shellcheck, and runs it end to end.
 
 The scale tests in `backend/tests/test_scale.py` seed 100,000 items and check query plans and latency. The browser tests include an automated accessibility audit (axe-core, WCAG A/AA) of every screen. `.github/workflows/ci.yml` runs all of this on GitHub.
 

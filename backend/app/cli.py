@@ -28,13 +28,20 @@ def cmd_backup(_: argparse.Namespace) -> int:
 
 
 def cmd_backup_loop(_: argparse.Namespace) -> int:
-    interval = get_settings().backup_interval_hours * 3600
+    from app.backup import notify, record_result
+
+    settings = get_settings()
+    interval = settings.backup_interval_hours * 3600
     while True:
         try:
             for info in create_backup():
                 log.info("backup written to %s: %s (%d bytes)", info.where, info.name, info.size)
-        except Exception:
+            if record_result(settings, None):
+                notify(settings, "Hoardware: backups are working again.")
+        except Exception as exc:
             log.exception("backup failed")
+            record_result(settings, str(exc))
+            notify(settings, f"Hoardware: the scheduled backup failed: {str(exc)[:300]}")
         time.sleep(interval)
 
 

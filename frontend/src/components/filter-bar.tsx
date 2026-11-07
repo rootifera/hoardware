@@ -262,7 +262,7 @@ export function FilterBar({
               Clear
             </Button>
           )}
-          <Button variant="outline" render={<a href={api.exportUrl(filters)} download />}>
+          <Button variant="outline" aria-label="Export CSV" render={<a href={api.exportUrl(filters)} download />}>
             <Download /> <span className="hidden sm:inline">CSV</span>
           </Button>
         </div>

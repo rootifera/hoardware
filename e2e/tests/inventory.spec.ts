@@ -383,7 +383,8 @@ test("Stock-take: verify what is in the box, then see what is missing", async ({
   await page.getByLabel("Stock-take").click();
   await page.getByRole("option", { name: "Not seen in 30 days" }).click();
   await expect(page.getByText("1 item", { exact: true })).toBeVisible();
-  await expect(page.getByText("#3", { exact: true })).toBeVisible();
+  // The position is its own badge on a desktop and part of the location line on a phone.
+  await expect(page.getByText(/(^|·\s)#3$/).filter({ visible: true }).first()).toBeVisible();
 
   const items = (await (await request.get(`/api/v1/items?location_id=${box.id}&sort=position&limit=10`)).json()).items;
   const detail = await (await request.get(`/api/v1/items/${items[0].id}`)).json();
@@ -840,15 +841,19 @@ test("A graphics card keeps its own name; the chipset is looked up separately", 
   await expect(page.getByText("This describes the card")).toBeVisible();
 });
 
-test("Quick add: manufacturer and model sit side by side, and Save & edit opens the new item", async ({ page, request }) => {
+test("Quick add: manufacturer and model sit side by side, and Save & edit opens the new item", async ({ page, request }, testInfo) => {
+  const narrow = (testInfo.project.use.viewport?.width ?? 1280) < 640;
   await page.goto("/");
   await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   const maker = await qa.getByLabel("Manufacturer").boundingBox();
   const model = await qa.getByLabel("Model / description").boundingBox();
-  expect(Math.abs(maker!.y - model!.y)).toBeLessThan(4);
-  expect(maker!.x).toBeLessThan(model!.x);
+  if (!narrow) {
+    // Fields stack on a phone, where there is no room for two columns.
+    expect(Math.abs(maker!.y - model!.y)).toBeLessThan(4);
+    expect(maker!.x).toBeLessThan(model!.x);
+  }
   const part = await qa.getByLabel("Part number").boundingBox();
   expect(part!.y).toBeLessThan(maker!.y);
 

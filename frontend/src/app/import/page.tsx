@@ -173,7 +173,7 @@ export default function ImportPage() {
           )}
 
           {report.errors.length > 0 && (
-            <div className="overflow-x-auto rounded-md border">
+            <div className="overflow-x-auto rounded-md border" tabIndex={0} role="region" aria-label="Rows with problems">
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">
                   <tr>
@@ -195,7 +195,7 @@ export default function ImportPage() {
           )}
 
           {report.preview.length > 0 && !report.committed && (
-            <div className="overflow-x-auto rounded-md border">
+            <div className="overflow-x-auto rounded-md border" tabIndex={0} role="region" aria-label="Preview of the rows to import">
               <p className="px-3 py-2 text-xs text-muted-foreground">First {report.preview.length} valid rows</p>
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cpu, Keyboard, LogOut, Moon, Plus, Sun } from "lucide-react";
+import { AlertTriangle, Cpu, Keyboard, LogOut, Moon, Plus, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -38,6 +38,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [help, setHelp] = useState(false);
   const queryClient = useQueryClient();
   const auth = useQuery({ queryKey: AUTH_KEY, queryFn: api.authStatus, staleTime: 60_000 });
+  // Things that need attention but do not stop the app: late backups, unreachable photo storage.
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 10 * 60_000, staleTime: 5 * 60_000, retry: false });
+  const warnings: string[] = [];
+  const backups = health.data?.backups;
+  if (backups?.status === "failing") warnings.push(`The last scheduled backup failed${backups.error ? `: ${backups.error}` : "."}`);
+  else if (backups?.status === "stale") warnings.push(`No backup for ${Math.round((backups.age_hours ?? 0) / 24)} day(s): scheduled backups are not running.`);
+  else if (backups?.status === "none") warnings.push("No backup has been made yet.");
+  if (health.data && health.data.storage.status !== "ok") warnings.push("Photo and file storage is not reachable: uploads and downloads will fail.");
   async function signOut() {
     await api.logout().catch(() => {});
     queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== AUTH_KEY[0] });
@@ -77,7 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur print:hidden">
         <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-2 px-4 sm:gap-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
+          <Link href="/" aria-label="Hoardware" className="flex items-center gap-2 font-semibold tracking-tight">
             <Cpu className="size-5" /> <span className="hidden sm:inline">Hoardware</span>
           </Link>
           <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm sm:gap-1">
@@ -122,6 +130,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      {warnings.length > 0 && (
+        <div role="status" className="border-b bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100 print:hidden">
+          <div className="mx-auto flex w-full max-w-7xl items-start gap-2 px-4 py-2 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0">
+              {warnings.map((w) => (
+                <p key={w} className="break-words">
+                  {w}
+                </p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <Dialog open={help} onOpenChange={setHelp}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
