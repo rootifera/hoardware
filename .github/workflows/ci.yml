@@ -105,7 +105,7 @@ jobs:
         working-directory: e2e
         run: |
           docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
-            -e BASE_URL=http://frontend:3000 -e E2E_PASSWORD="$AUTH_PASSWORD" \
+            -e BASE_URL=http://frontend:3000 -e E2E_PASSWORD="$AUTH_PASSWORD" -e CI=true \
             mcr.microsoft.com/playwright:v1.64.0-noble \
             npx playwright test --project=chromium --project=firefox --project=webkit --project=phone
       - name: Show the logs if something failed

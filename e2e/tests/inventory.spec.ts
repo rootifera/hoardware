@@ -1087,8 +1087,9 @@ test("Quick add: a lookup box that appears late never takes over what you are ty
   await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
-  await qa.getByLabel("Category").click();
-  await page.getByRole("option", { name: "CPU", exact: true }).click();
+  // With nothing remembered the first category (CPU) is already selected: no need to open the list,
+  // which also avoids racing its open animation.
+  await expect(qa.getByLabel("Category")).toContainText("CPU");
   const model = qa.getByLabel("Model / description");
   // Focus the Model field and wait with the cursor in it, before anything has been typed...
   await model.click();

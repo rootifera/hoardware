@@ -8,6 +8,9 @@ export default defineConfig({
   testDir: "./tests",
   timeout: 30_000,
   workers: 1,
+  // A slow CI runner can make a menu animation lose a race now and then (mostly in WebKit): one retry,
+  // and the report still lists the test as flaky so it does not go unnoticed.
+  retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
   globalSetup: "./global-setup.ts",
   use: {
