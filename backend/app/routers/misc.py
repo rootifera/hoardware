@@ -134,9 +134,11 @@ def _cell(value) -> str:
     return text_value
 
 
-@router.get("/export/items.csv", tags=["export"])
-def export_items_csv(filters: FiltersDep):
-    """Stream the (optionally filtered) inventory as CSV with constant memory."""
+def items_csv_response(filters, ids: list[int] | None = None) -> StreamingResponse:
+    """Stream items as CSV with constant memory: the filtered inventory, or just the given ids."""
+    from sqlalchemy import BigInteger, any_, bindparam
+    from sqlalchemy.dialects.postgresql import ARRAY
+
     from app.models import Category, Location
 
     def rows() -> Iterator[str]:
@@ -170,8 +172,10 @@ def export_items_csv(filters: FiltersDep):
                     Item.updated_at,
                 ),
                 filters,
-            ).order_by(Item.id)
-            result = session.execute(stmt.execution_options(stream_results=True, yield_per=1000))
+            )
+            if ids is not None:
+                stmt = stmt.where(Item.id == any_(bindparam("ids", ids, type_=ARRAY(BigInteger))))
+            result = session.execute(stmt.order_by(Item.id).execution_options(stream_results=True, yield_per=1000))
             for batch in result.partitions():
                 buffer.seek(0)
                 buffer.truncate()
@@ -185,3 +189,9 @@ def export_items_csv(filters: FiltersDep):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="hoardware-items-{stamp}.csv"'},
     )
+
+
+@router.get("/export/items.csv", tags=["export"])
+def export_items_csv(filters: FiltersDep):
+    """Stream the (optionally filtered) inventory as CSV with constant memory."""
+    return items_csv_response(filters)

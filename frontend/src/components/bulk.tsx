@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCheck, Loader2, MapPinned, NotebookPen, X } from "lucide-react";
+import { CheckCheck, Download, Loader2, MapPinned, NotebookPen, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
@@ -240,6 +240,18 @@ export function BulkBar({
   const [moving, setMoving] = useState(false);
   const [notes, setNotes] = useState(false);
   const [pending, setPending] = useState<{ label: string; changes: BulkChanges } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      await api.exportSelected(selection);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const apply = useMutation({
     mutationFn: (changes: BulkChanges) => api.bulk(selection, changes),
@@ -262,7 +274,8 @@ export function BulkBar({
       <div
         role="region"
         aria-label="Bulk actions"
-        className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-xl border bg-popover px-3 py-2 shadow-lg"
+        // Sticks under the page header while the list scrolls, so it is always in sight.
+        className="sticky top-16 z-30 mb-3 flex flex-wrap items-center gap-2 rounded-xl border bg-popover px-3 py-2 shadow-md"
       >
         <span className="px-1 text-sm font-medium">{plural(count)} selected</span>
         <DropdownMenu>
@@ -319,11 +332,27 @@ export function BulkBar({
         <Button variant="outline" size="sm" disabled={apply.isPending} onClick={() => setMoving(true)}>
           <MapPinned /> Move…
         </Button>
+        <Button variant="outline" size="sm" disabled={apply.isPending || exporting} title="Download the selected items as a CSV file" onClick={() => void exportCsv()}>
+          {exporting ? <Loader2 className="animate-spin" /> : <Download />} Export
+        </Button>
+        <Button variant="outline" size="sm" className="text-destructive" disabled={apply.isPending} onClick={() => setDeleting(true)}>
+          <Trash2 /> Delete…
+        </Button>
         <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={onClear}>
           <X />
         </Button>
       </div>
 
+      <DeleteDialog
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        selection={selection}
+        count={count}
+        onDone={() => {
+          invalidate();
+          onClear();
+        }}
+      />
       <MoveDialog open={moving} onClose={() => setMoving(false)} selection={selection} count={count} onDone={onClear} />
       <NotesDialog
         open={notes}
@@ -343,5 +372,79 @@ export function BulkBar({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+const TYPE_TO_CONFIRM_ABOVE = 25;
+
+/** Delete the selected items for good. Larger deletions must be confirmed by typing "delete". */
+function DeleteDialog({
+  open,
+  onClose,
+  selection,
+  count,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selection: BulkSelection;
+  count: number;
+  onDone: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const needsTyping = count > TYPE_TO_CONFIRM_ABOVE;
+  const remove = useMutation({
+    mutationFn: () => api.bulkDelete(selection),
+    onSuccess: (r) => {
+      toast.success(`Deleted ${plural(r.deleted)}`);
+      setTyped("");
+      onClose();
+      onDone();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setTyped("");
+          onClose();
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {plural(count)}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The selected items are removed permanently, together with their photos, files and test history. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {needsTyping && (
+          <label className="grid gap-1.5 text-sm">
+            Type <b>delete</b> to confirm
+            <input
+              className="h-9 rounded-lg border border-input bg-transparent px-2.5 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={remove.isPending || (needsTyping && typed.trim().toLowerCase() !== "delete")}
+            onClick={(e) => {
+              e.preventDefault();
+              remove.mutate();
+            }}
+          >
+            {remove.isPending && <Loader2 className="animate-spin" />} Delete {plural(count)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

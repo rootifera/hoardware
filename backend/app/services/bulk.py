@@ -11,11 +11,13 @@ from sqlalchemy import BigInteger, any_, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
-from app.models import Category, Item, Location
-from app.schemas import BulkFilter, BulkIn, BulkOut, BulkSelection
+from app.models import Category, Item, ItemFile, Location, Photo
+from app.schemas import BulkDeleteIn, BulkDeleteOut, BulkFilter, BulkIn, BulkOut, BulkSelection
 from app.services import items as item_service
 from app.services import locations as location_service
 from app.services.items import ItemFilters
+from app.services.photos import process_pending_deletions, queue_deletions
+from app.storage import StorageError, get_storage
 
 MAX_SELECTED = 100_000
 
@@ -68,6 +70,32 @@ def _clashes(session: Session, ids: list[int], destination: int) -> int:
         )
     )
     return int(with_destination or 0) + int(among_themselves or 0)
+
+
+def delete_bulk(session: Session, body: BulkDeleteIn) -> BulkDeleteOut:
+    """Delete the selected items, with their photos and files (the stored objects are queued
+    for removal in the same transaction, like deleting one item)."""
+    ids = resolve_ids(session, body.selection)
+    if body.dry_run or not ids:
+        session.rollback()
+        return BulkDeleteOut(matched=len(ids), deleted=0, dry_run=body.dry_run)
+    keys = list(session.scalars(select(Photo.storage_key).where(Photo.item_id == any_(_ids_param(ids)))))
+    keys += session.scalars(select(Photo.thumb_key).where(Photo.item_id == any_(_ids_param(ids))))
+    keys += session.scalars(select(ItemFile.storage_key).where(ItemFile.item_id == any_(_ids_param(ids))))
+    queue_deletions(session, keys)
+    deleted = session.execute(
+        text("DELETE FROM items WHERE id = ANY(:ids)").bindparams(_ids_param(ids))
+    ).rowcount
+    session.commit()
+    # Remove the stored objects now; anything left (a storage outage, a huge batch) is retried by storage-gc.
+    for _ in range(40):
+        try:
+            done, failed = process_pending_deletions(session, get_storage(), limit=500)
+        except StorageError:
+            break
+        if failed or done < 500:
+            break
+    return BulkDeleteOut(matched=len(ids), deleted=deleted or 0, dry_run=False)
 
 
 def apply_bulk(session: Session, body: BulkIn) -> BulkOut:

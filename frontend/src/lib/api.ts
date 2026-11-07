@@ -183,6 +183,24 @@ export const api = {
   login: (username: string, password: string) => request<AuthStatus>("/auth/login", json("POST", { username, password })),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
+  bulkDelete: (selection: BulkSelection, dryRun = false) =>
+    request<{ matched: number; deleted: number; dry_run: boolean }>("/items/bulk-delete", json("POST", { selection, dry_run: dryRun })),
+  /** The selected items as a CSV download. */
+  exportSelected: async (selection: BulkSelection) => {
+    const response = await fetch(`${BASE}/items/bulk-export`, json("POST", selection));
+    if (!response.ok) throw new ApiError(response.status, `Export failed (${response.status})`);
+    const blob = await response.blob();
+    const name = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1] ?? "hoardware-items.csv";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   uploadFiles: (itemId: number, files: File[], kind: FileKind = "other") => {
     const form = new FormData();
     files.forEach((f) => form.append("files", f));

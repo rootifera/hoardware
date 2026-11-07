@@ -979,3 +979,83 @@ test("Quick add can attach manuals, drivers and tools while adding the item", as
   const files = (await (await request.get(`/api/v1/items/${newest.id}`)).json()).files;
   expect(files.map((f: { filename: string; kind: string }) => `${f.filename}:${f.kind}`).sort()).toEqual(["Board manual.pdf:manual", "vga-driver.zip:driver"]);
 });
+
+test("Quick add: a failed photo or file upload is reported, and the item is still saved", async ({ page, request }) => {
+  await page.route("**/api/v1/items/*/photos", (route) => route.fulfill({ status: 413, contentType: "text/html", body: "<h1>413 Request Entity Too Large</h1>" }));
+  await page.route("**/api/v1/items/*/files", (route) => route.fulfill({ status: 403, contentType: "text/html", body: "<h1>403 Forbidden</h1>" }));
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(`Upload fails ${RUN}`);
+  await qa.locator("#qa-photos").setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
+  await qa.locator("#qa-files").setInputFiles({ name: "d.zip", mimeType: "application/zip", buffer: Buffer.from("PK") });
+  await qa.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/was saved, but the photo could not be uploaded.*and the file could not be uploaded/)).toBeVisible();
+  const item = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Upload fails ${RUN}`)}&limit=1`)).json()).items[0];
+  created.push(item.id);
+  expect(item.model).toBe(`Upload fails ${RUN}`);
+});
+
+test("Selected items can be exported or deleted from the bar above the list", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const prefix = `Bulk del ${RUN}`;
+  const ids: number[] = [];
+  for (let i = 0; i < 4; i++) ids.push((await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${prefix} ${i}` } })).json()).id);
+  created.push(...ids);
+
+  await page.goto(`/?q=${encodeURIComponent(prefix)}`);
+  const boxes = page.getByRole("checkbox", { name: /^Select HW-/ });
+  await expect(boxes).toHaveCount(4);
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  const bar = page.getByRole("region", { name: "Bulk actions" });
+  await expect(bar).toContainText("2 items selected");
+  // The bar sits above the list, in view without scrolling.
+  const barBox = await bar.boundingBox();
+  expect(barBox!.y).toBeLessThan(500);
+
+  // Export: a CSV with just the two selected items.
+  const download = page.waitForEvent("download");
+  await bar.getByRole("button", { name: "Export" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^hoardware-items-.*\.csv$/);
+  const text = (await (await import("node:fs/promises")).readFile(await file.path()!, "utf-8")).toString();
+  expect(text.split("\n").filter((l) => l.includes(prefix))).toHaveLength(2);
+
+  // Delete: cancel keeps them, confirm removes only the selected ones.
+  await bar.getByRole("button", { name: "Delete…" }).click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText("Delete 2 items?");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(boxes).toHaveCount(4);
+  await bar.getByRole("button", { name: "Delete…" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete 2 items" }).click();
+  await expect(page.getByText("Deleted 2 items")).toBeVisible();
+  await expect(boxes).toHaveCount(2);
+  await expect(bar).toHaveCount(0);
+});
+
+test("Deleting a large selection has to be confirmed by typing", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const prefix = `Bulk big ${RUN}`;
+  const batch = await request.post("/api/v1/items/batch", { data: { item: { category_id: cats[0].id, model: prefix }, copies: 30 } });
+  expect(batch.ok()).toBeTruthy();
+  await trackByModel(request, prefix);
+
+  await page.goto(`/?q=${encodeURIComponent(prefix)}`);
+  await page.getByRole("checkbox", { name: "Select all loaded items" }).check();
+  const bar = page.getByRole("region", { name: "Bulk actions" });
+  await expect(bar).toContainText("30 items selected");
+  await bar.getByRole("button", { name: "Delete…" }).click();
+  const confirm = page.getByRole("alertdialog");
+  const go = confirm.getByRole("button", { name: "Delete 30 items" });
+  await expect(go).toBeDisabled();
+  await confirm.getByRole("textbox").fill("delete");
+  await expect(go).toBeEnabled();
+  await go.click();
+  await expect(page.getByText("Deleted 30 items")).toBeVisible();
+  const left = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(prefix)}&limit=5`)).json()).items;
+  expect(left).toHaveLength(0);
+});

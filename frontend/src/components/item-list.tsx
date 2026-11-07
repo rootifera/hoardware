@@ -4,7 +4,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { Cpu, ImageOff, MapPin, PackageOpen, SearchX } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BulkBar, EMPTY_SELECTION, toBulkSelection, type Selection } from "@/components/bulk";
 import { ConditionBadge, ConfidenceBadge, TestStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -152,9 +152,16 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
   // Distance from the top of the page to the list, so the window virtualizer
   // knows where the rows start.
   const [scrollMargin, setScrollMargin] = useState(0);
+  const listNode = useRef<HTMLDivElement | null>(null);
   const listRef = useCallback((node: HTMLDivElement | null) => {
+    listNode.current = node;
     if (node) setScrollMargin(node.offsetTop);
   }, []);
+  // The bulk bar appears above the list when rows are ticked, which moves the list down.
+  const barShown = selectedCount > 0;
+  useLayoutEffect(() => {
+    if (listNode.current) setScrollMargin(listNode.current.offsetTop);
+  }, [barShown]);
 
   const virtualizer = useWindowVirtualizer({
     count: items.length,
@@ -219,8 +226,7 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
   }
 
   return (
-    // Room at the bottom so the floating bulk bar never hides the last rows.
-    <div className={selectedCount > 0 ? "pb-28" : undefined}>
+    <div>
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 text-sm text-muted-foreground">
         <label className="flex cursor-pointer items-center gap-3">
           <input
@@ -249,6 +255,9 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
           </span>
         )}
       </div>
+      {selectedCount > 0 && (
+        <BulkBar count={selectedCount} selection={toBulkSelection(sel, filters)} onClear={() => setSel(EMPTY_SELECTION)} />
+      )}
       <div ref={listRef} className="relative" style={{ height: virtualizer.getTotalSize() }}>
         {virtualItems.map((row) => {
           const item = items[row.index];
@@ -266,9 +275,6 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
       <p className="py-4 text-center text-sm text-muted-foreground">
         {isFetchingNextPage ? "Loading more…" : hasNextPage ? "" : `End of list`}
       </p>
-      {selectedCount > 0 && (
-        <BulkBar count={selectedCount} selection={toBulkSelection(sel, filters)} onClear={() => setSel(EMPTY_SELECTION)} />
-      )}
     </div>
   );
 }

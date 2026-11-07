@@ -441,6 +441,17 @@ class BulkIn(BaseModel):
     dry_run: bool = False
 
 
+class BulkDeleteIn(BaseModel):
+    selection: BulkSelection
+    dry_run: bool = False
+
+
+class BulkDeleteOut(BaseModel):
+    matched: int
+    deleted: int
+    dry_run: bool
+
+
 class BulkOut(BaseModel):
     matched: int
     moved: int  # items whose location actually changed

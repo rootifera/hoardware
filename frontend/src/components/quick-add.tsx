@@ -311,12 +311,15 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           : null;
       const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: location?.id ?? null, order: start });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ category: effectiveCategory, location } satisfies Remembered));
-      let photoNote = "";
+      // The item is saved either way. A failed upload must not go unnoticed, so it gets its own
+      // lasting message saying what failed and why.
+      const problems: string[] = [];
+      const reason = (e: unknown) => (e instanceof Error ? e.message : "upload error");
       if (item && files.length) {
         try {
           await api.uploadPhotos(item.id, files);
         } catch (e) {
-          photoNote = ` (photos failed: ${e instanceof Error ? e.message : "upload error"})`;
+          problems.push(`the photo${files.length === 1 ? "" : "s"} could not be uploaded (${reason(e)})`);
         }
       }
       if (item && attachments.length) {
@@ -327,7 +330,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             if (group.length) await api.uploadFiles(item.id, group, kind);
           }
         } catch (e) {
-          photoNote += ` (files failed: ${e instanceof Error ? e.message : "upload error"}; add them on the item page)`;
+          problems.push(`the file${attachments.length === 1 ? "" : "s"} could not be uploaded (${reason(e)})`);
         }
       }
       queryClient.invalidateQueries({ queryKey: ["items"] });
@@ -344,10 +347,17 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             <Link className="font-medium underline" href={`/items/${item!.id}`}>
               {item!.inventory_code}
             </Link>
-            {photoNote}
           </span>
         ),
       );
+      if (item && problems.length) {
+        toast.error(
+          <span>
+            {item.inventory_code} was saved, but {problems.join(", and ")}. Add {problems.length > 1 ? "them" : "it"} from the item page.
+          </span>,
+          { duration: 30000 },
+        );
+      }
       if (mode === "another") {
         setModel("");
         setPartNumber("");
