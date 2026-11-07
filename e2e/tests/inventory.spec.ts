@@ -1064,3 +1064,29 @@ test("Deleting a large selection has to be confirmed by typing", async ({ page, 
   const left = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(prefix)}&limit=5`)).json()).items;
   expect(left).toHaveLength(0);
 });
+
+test("Quick add: a lookup box that appears late never takes over what you are typing", async ({ page, request }) => {
+  const sources = await (await request.get("/api/v1/reference-sources")).json();
+  test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
+
+  // The datasets answer slowly, so the lookup box shows up while the first characters are being typed.
+  await page.route("**/api/v1/reference-sources", async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.addInitScript(() => localStorage.removeItem("hoardware.quickadd"));
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name: "CPU", exact: true }).click();
+  const model = qa.getByLabel("Model / description");
+  // Focus the Model field and wait with the cursor in it, before anything has been typed...
+  await model.click();
+  await expect(qa.getByLabel(/Look up in the CPU database/)).toBeVisible({ timeout: 10_000 });
+  // ...the lookup box appearing must not have moved the cursor: this goes into the focused field.
+  await page.keyboard.type("Typing while it loads");
+  await expect(model).toHaveValue("Typing while it loads");
+  await expect(qa.getByLabel(/Look up in the CPU database/)).toHaveValue("");
+});

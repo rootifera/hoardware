@@ -217,11 +217,15 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const listOpen = wantsResults && offered.length > 0 && closedFor !== typed;
   const noResults = wantsResults && results.isSuccess && typed === lookupText.trim() && offered.length === 0;
 
-  // Start in the lookup box when there is one, otherwise in the model box.
+  // Start in the lookup box when there is one. This must never take focus from a field the
+  // person is already using: the box can appear a moment after the dialog opens (the datasets
+  // are still loading), and pulling focus then would send half of what they type to the wrong place.
+  const touched = useRef(false);
   useEffect(() => {
+    if (!lookupAvailable || touched.current) return;
     const active = document.activeElement;
-    if (lookupAvailable && (active === document.body || active === modelRef.current) && model === "") lookupRef.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const typingSomewhere = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+    if (!typingSomewhere) lookupRef.current?.focus();
   }, [lookupAvailable]);
 
   function pick(c: ReferenceCandidate) {
@@ -442,6 +446,12 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     <form
       // minmax(0, 1fr): long content (e.g. the match bar) must wrap, not widen the dialog.
       className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4"
+      onKeyDownCapture={() => {
+        touched.current = true;
+      }}
+      onChangeCapture={() => {
+        touched.current = true;
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         void save("close");
