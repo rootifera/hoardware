@@ -131,18 +131,9 @@ configure_s3() { # configure_s3 PREFIX "check command (python code)"
 # creates the folder itself, owned by root, and the reference data could not be downloaded into it.
 mkdir -p "$(get_env REFERENCE_DATA_DIR ./reference-data)"
 
-# Ask for the (optional) token the app uses to read version.json from a private GitHub repository,
-# and point the check at this checkout's own repository and branch.
-configure_version_check() {
-  local token origin repo branch
-  echo
-  echo "Update notice: the app checks the git repository for a newer version.json every few hours and"
-  echo "shows a small \"update available\" note. A private repository needs a read-only access token"
-  echo "(GitHub > Settings > Developer settings > Fine-grained tokens: this repository only,"
-  echo "permission \"Contents: read-only\"). Leave empty to skip."
-  read -r -s -p "  Token: " token
-  echo >&2
-  set_env VERSION_CHECK_TOKEN "$token"
+# Point the update check at this checkout's own repository and branch (no questions asked).
+set_version_check_url() {
+  local origin repo branch
   origin="$(git remote get-url origin 2>/dev/null || true)"
   repo="$(printf '%s' "$origin" | sed -nE 's#^(git@github\.com:|https://github\.com/)([^/]+/[^/]+)$#\2#p' | sed 's/\.git$//')"
   if [ -n "$repo" ]; then
@@ -174,10 +165,6 @@ ok "images built"
 step "3/5 Checking .env"
 if [ -f .env ]; then
   ok ".env exists, keeping it as it is"
-  # An install from before the update notice: ask for the token once (the key is then in .env).
-  if [ -t 0 ] && ! grep -q '^VERSION_CHECK_TOKEN=' .env; then
-    configure_version_check
-  fi
   # An install from before backup monitoring: scheduled backups are on, so have the app watch them.
   if [ "$(get_env COMPOSE_PROFILES)" = backup ] && [ -z "$(get_env BACKUP_EXPECTED)" ]; then
     set_env BACKUP_EXPECTED yes
@@ -282,7 +269,7 @@ else
     [ -n "$NOTIFY_URL" ] && set_env BACKUP_NOTIFY_URL "$NOTIFY_URL"
   fi
 
-  configure_version_check
+  set_version_check_url
 
   # Reference data
   echo

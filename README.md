@@ -74,7 +74,7 @@ The installed version is baked into the backend image from this file and shown i
 
 To publish a release: edit `version.json` (new `version`, a `build_name`, and `build_time` = `date +%s`), commit and push. Installs notice within about six hours.
 
-A **private repository** needs a read-only token for the check, otherwise GitHub answers 404: create a fine-grained personal access token limited to this repository with *Contents: read-only* and put it in `.env` as `VERSION_CHECK_TOKEN` (`deploy.sh` asks for it once). `VERSION_CHECK_URL` defaults to this repository's `main` branch (`deploy.sh` sets it from your checkout); set it to `off` to switch the check off.
+`VERSION_CHECK_URL` defaults to this repository's `main` branch (`deploy.sh` sets it from your checkout when it creates `.env`); set it to `off` to switch the check off. If you run a **private fork**, GitHub answers 404 to an anonymous request: put a fine-grained read-only token (*Contents: read-only*, that repository only) in `.env` as `VERSION_CHECK_TOKEN`.
 
 ## Login and running behind a reverse proxy
 
