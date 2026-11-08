@@ -41,7 +41,7 @@ test("Quick Add with the keyboard, then find the part by search", async ({ page,
   const model = `Unknown ISA VGA ${RUN}`;
   await page.goto("/");
   // Client-rendered content means React has hydrated and shortcuts are live.
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -175,7 +175,7 @@ test("Ten identical CPUs sit at ten exact positions in one location", async ({ p
   const model = `Identical CPU ${RUN}`;
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(model);
@@ -184,7 +184,9 @@ test("Ten identical CPUs sit at ten exact positions in one location", async ({ p
   // The empty tray offers position 1 as the next free spot.
   await expect(qa.getByLabel("Position")).toHaveAttribute("placeholder", "next: 1");
   await qa.getByLabel("Position").fill("1");
-  await qa.getByLabel("Copies").fill("10");
+  // Several identical items are a shortcut kept out of the way until asked for.
+  await qa.getByRole("button", { name: "Add several separate items…" }).click();
+  await qa.getByLabel("Number of items").fill("10");
   await expect(qa.getByText("10 separate items at positions 1–10.")).toBeVisible();
   await qa.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Added 10 items/)).toBeVisible();
@@ -405,7 +407,7 @@ test("Quick Add warns when you already have matching items", async ({ page, requ
   for (let i = 0; i < 2; i++) await request.post("/api/v1/items", { data: { category_id: cats[0].id, model } });
   await trackByModel(request, model);
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(model);
@@ -470,7 +472,7 @@ test("Spec names are suggested, and 'Add another like this' prefills Quick Add",
 
 test("The ? key lists the keyboard shortcuts", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("?");
   const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
   await expect(dialog).toBeVisible();
@@ -484,7 +486,7 @@ test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({
   test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
 
@@ -556,7 +558,7 @@ test("A pick can be undone, and ignoring the list changes nothing", async ({ pag
   test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -584,7 +586,7 @@ test("The suggestion dropdown: arrow key, Esc closes only it, and the dialog nev
   test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -622,7 +624,7 @@ test("Looking up an S-Spec gives a proper name, full specs, and a useful invento
   test.skip(!sources.some((s: { models: number }) => s.models > 0), "no reference dataset imported");
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -811,7 +813,7 @@ test("A graphics card keeps its own name; the chipset is looked up separately", 
   test.skip(!sources.some((s: { key: string; models: number }) => s.key === "gpus-specs" && s.models > 0), "no graphics dataset imported");
 
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -852,7 +854,7 @@ test("A graphics card keeps its own name; the chipset is looked up separately", 
 test("Quick add: manufacturer and model sit side by side, and Save & edit opens the new item", async ({ page, request }, testInfo) => {
   const narrow = (testInfo.project.use.viewport?.width ?? 1280) < 640;
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   const maker = await qa.getByLabel("Manufacturer").boundingBox();
@@ -876,7 +878,7 @@ test("Quick add: manufacturer and model sit side by side, and Save & edit opens 
 
 test("Quick add takes a RAM or storage item's specifications in one go", async ({ page, request }) => {
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -906,7 +908,7 @@ test("Quick add takes a RAM or storage item's specifications in one go", async (
 
 test("RAM and storage fields offer predefined values, and a custom value still works", async ({ page, request }) => {
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Category").click();
@@ -952,7 +954,7 @@ test("Quick add still shows the category's fields when the remembered category n
   // e.g. after the database was restored: the saved category id points at nothing.
   await page.addInitScript(() => localStorage.setItem("hoardware.quickadd", JSON.stringify({ category: "999999" })));
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await expect(qa.getByLabel("Category")).toContainText("CPU");
@@ -962,7 +964,7 @@ test("Quick add still shows the category's fields when the remembered category n
 
 test("Quick add can attach manuals, drivers and tools while adding the item", async ({ page, request }) => {
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(`Attach in add ${RUN}`);
@@ -998,7 +1000,7 @@ test("Quick add: a failed photo or file upload is reported, and the item is stil
   await page.route("**/api/v1/items/*/files", (route) => route.fulfill({ status: 403, contentType: "text/html", body: "<h1>403 Forbidden</h1>" }));
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(`Upload fails ${RUN}`);
@@ -1084,7 +1086,7 @@ test("Quick add: a lookup box that appears late never takes over what you are ty
   });
   await page.addInitScript(() => localStorage.removeItem("hoardware.quickadd"));
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   await page.keyboard.press("n");
   const qa = page.getByRole("dialog");
   // With nothing remembered the first category (CPU) is already selected: no need to open the list,
@@ -1102,7 +1104,7 @@ test("Quick add: a lookup box that appears late never takes over what you are ty
 
 test("The version sits quietly in a corner, and an update shows as a small pill", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
   const tag = page.getByText(/^Hoardware \d+\.\d+\.\d+/);
   await expect(tag).toBeVisible();
   const box = await tag.boundingBox();
@@ -1124,4 +1126,485 @@ test("The version sits quietly in a corner, and an update shows as a small pill"
   await expect(page.getByText("A new version is available")).toBeVisible();
   await expect(page.getByText(/“Basalt”/)).toBeVisible();
   await expect(page.getByText("./deploy.sh")).toBeVisible();
+});
+
+test("A category can hide and rename the standard fields, and every screen follows", async ({ page, request }) => {
+  const name = `Cards ${RUN}`;
+  // Last in the list, so a failed run can never change which category is the default for other tests.
+  const cat = await (await request.post("/api/v1/categories", { data: { name, sort_order: 900, fields: [{ name: "Year", hint: "e.g. 1986", column: null, options: [] }] } })).json();
+  try {
+
+  // Edit it in the category editor: the "Standard details" tab.
+  await page.goto("/categories");
+  await page.getByRole("button", { name: `Fields of ${name}` }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("tab", { name: "Standard details" }).click();
+  await dialog.getByLabel("Name for Manufacturer").fill("Brand");
+  await dialog.getByLabel("Name for Model / description").fill("Player");
+  await dialog.getByLabel("Show Part number").uncheck();
+  await dialog.getByLabel("Show Test status").uncheck();
+  await dialog.getByLabel("Show How sure are you of the exact model?").uncheck();
+  await dialog.getByLabel("Name for Condition").fill("Grade");
+  await dialog.getByText("Rename the values").first().click();
+  await dialog.getByLabel("Name for Excellent").fill("Near mint");
+  await dialog.getByRole("button", { name: "Save fields" }).click();
+  await expect(page.getByText(`${name} fields saved`)).toBeVisible();
+
+  const saved = (await (await request.get("/api/v1/categories")).json()).find((c: { id: number }) => c.id === cat.id);
+  expect(saved.settings.core.part_number).toEqual({ show: false });
+  expect(saved.settings.core.manufacturer).toEqual({ label: "Brand" });
+  expect(saved.settings.values.condition).toEqual({ Excellent: "Near mint" });
+
+  // Quick add follows: no part number or test status, the new names, the renamed condition value.
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Category").click();
+  await page.getByRole("option", { name, exact: true }).click();
+  await expect(qa.getByLabel("Brand")).toBeVisible();
+  await expect(qa.getByLabel("Player")).toBeVisible();
+  await expect(qa.getByLabel("Part number")).toHaveCount(0);
+  await expect(qa.getByLabel("Test status")).toHaveCount(0);
+  await expect(qa.getByLabel("Year", { exact: true })).toBeVisible();
+  await qa.getByLabel("Grade").click();
+  await expect(page.getByRole("option", { name: "Near mint" })).toBeVisible();
+  await page.getByRole("option", { name: "Near mint" }).click();
+  await qa.getByLabel("Brand").fill("Topps");
+  await qa.getByLabel("Player").fill(`Rookie ${RUN}`);
+  await qa.getByRole("button", { name: "Save & edit" }).click();
+  await page.waitForURL(/\/items\/\d+$/);
+  const id = Number(page.url().split("/").pop());
+  created.push(id);
+  const saved_item = await (await request.get(`/api/v1/items/${id}`)).json();
+  expect(saved_item.condition).toBe("Excellent"); // stored value unchanged: only its name differs
+
+  // The item page: same names, no part number / test status / test history, no database matching.
+  await expect(page.getByLabel("Brand")).toHaveValue("Topps");
+  await expect(page.getByLabel("Player")).toHaveValue(`Rookie ${RUN}`);
+  await expect(page.getByLabel("Part number")).toHaveCount(0);
+  await expect(page.getByLabel("Test status")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Test history" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Matched record" })).toHaveCount(0);
+  await expect(page.getByText("Near mint").first()).toBeVisible();
+
+  // The list: the renamed condition, and no test status badge.
+  await page.goto(`/?q=${encodeURIComponent(`Rookie ${RUN}`)}`);
+  const row = page.locator(`a[href="/items/${id}"]`);
+  await expect(row).toBeVisible();
+  await expect(row).not.toContainText("Untested");
+  await row.getByText("Near mint").waitFor({ state: "attached" });
+
+  // The list filters adapt when this category is chosen.
+  await page.goto(`/?category=${cat.id}`);
+  await expect(page.getByRole("group", { name: "Test status" })).toHaveCount(0);
+
+  await request.delete(`/api/v1/items/${id}`);
+  } finally {
+    // Whatever happened above, no item or category of this test is left behind.
+    const left = (await (await request.get(`/api/v1/items?category_id=${cat.id}&limit=50`)).json()).items;
+    for (const i of left) await request.delete(`/api/v1/items/${i.id}`);
+    await request.delete(`/api/v1/categories/${cat.id}`);
+  }
+});
+
+test("First run: the choice between standard and your own collection", async ({ page }) => {
+  const presets = [
+    { key: "pc", name: "PC hardware", description: "PC parts.", code_prefix: "HW", categories: ["CPU", "RAM"] },
+    { key: "music", name: "Music gear", description: "Synths and pedals.", code_prefix: "MG", categories: ["Synthesizers", "Effects pedals"] },
+    { key: "blank", name: "Start empty", description: "Begin from nothing.", code_prefix: "IT", categories: ["Items"] },
+  ];
+  let posted: Record<string, unknown> | null = null;
+  let complete = false;
+  await page.route("**/api/v1/setup", async (route) => {
+    if (route.request().method() === "POST") {
+      posted = route.request().postDataJSON();
+      complete = true;
+    }
+    await route.fulfill({ json: { complete, title: posted?.title ?? "Hoardware", code_prefix: posted?.code_prefix ?? "HW", presets } });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "What are you keeping track of?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /PC hardware \(standard\)/ })).toBeVisible();
+
+  // Customise: pick a starter set, name the collection, choose the code prefix.
+  await page.getByRole("button", { name: /Something else/ }).click();
+  await expect(page.getByRole("heading", { name: "Pick a starting point" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /PC hardware/ })).toHaveCount(0); // the standard set has its own button
+  await page.getByRole("radio", { name: /Music gear/ }).check();
+  await expect(page.getByLabel("Item code prefix")).toHaveValue("MG"); // the set's own prefix
+  await page.getByLabel("Name of your collection").fill("My Studio");
+  await page.getByLabel("Item code prefix").fill("stu");
+  await expect(page.getByText("Codes look like STU-000001")).toBeVisible();
+  await page.getByLabel("Item code prefix").fill("bad prefix!");
+  await expect(page.getByRole("button", { name: "Create my collection" })).toBeDisabled();
+  await page.getByLabel("Item code prefix").fill("stu");
+  await page.getByRole("button", { name: "Create my collection" }).click();
+  await expect.poll(() => posted).toEqual({ mode: "custom", preset: "music", title: "My Studio", code_prefix: "STU" });
+  // Afterwards the app itself shows, under the collection's name.
+  await expect(page.getByRole("link", { name: "My Studio" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What are you keeping track of?" })).toHaveCount(0);
+});
+
+test("First run: standard needs one click", async ({ page }) => {
+  let complete = false;
+  let posted: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/setup", async (route) => {
+    if (route.request().method() === "POST") {
+      posted = route.request().postDataJSON();
+      complete = true;
+    }
+    await route.fulfill({ json: { complete, title: "Hoardware", code_prefix: "HW", presets: [] } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /PC hardware \(standard\)/ }).click();
+  await expect.poll(() => posted).toEqual({ mode: "standard" });
+  await expect(page.getByRole("link", { name: "Hoardware" })).toBeVisible();
+});
+
+test("A starter set can be added later from the Categories page", async ({ page, request }) => {
+  const before = new Set((await (await request.get("/api/v1/categories")).json()).map((c: { name: string }) => c.name));
+  try {
+    await page.goto("/categories");
+    await page.getByRole("button", { name: "Add a starter set…" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("Trading cards & collectibles")).toBeVisible();
+    await dialog.getByRole("button", { name: "Add Trading cards & collectibles" }).click();
+    await expect(page.getByText(/Added Sports cards, Trading card games/)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Add Trading cards & collectibles" })).toHaveText("Added");
+    await page.keyboard.press("Escape");
+    await expect(page.getByLabel("Name of Sports cards")).toBeVisible();
+    // Their settings came along: no test status for cards.
+    const cards = (await (await request.get("/api/v1/categories")).json()).find((c: { name: string }) => c.name === "Sports cards");
+    expect(cards.settings.core.test_status).toEqual({ show: false });
+    expect(cards.fields.map((f: { name: string }) => f.name)).toContain("Grading company");
+  } finally {
+    for (const c of (await (await request.get("/api/v1/categories")).json()) as { id: number; name: string }[]) {
+      if (!before.has(c.name)) await request.delete(`/api/v1/categories/${c.id}`);
+    }
+  }
+});
+
+
+test("Track as stock: one record for many pieces, with take out and add", async ({ page, request }) => {
+  const name = `Parts ${RUN}`;
+  // This category starts new items as stock items (what the electronics starter set does for components).
+  const cat = await (
+    await request.post("/api/v1/categories", {
+      data: { name, sort_order: 900, fields: [{ name: "Value", hint: "e.g. 100nF", column: null, options: [] }], settings: { core: { stock: { show: true } } } },
+    })
+  ).json();
+  try {
+    await page.goto("/");
+    await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+    await page.keyboard.press("n");
+    const qa = page.getByRole("dialog");
+    // A normal category: unticked, no quantity, only the folded-away "several separate items".
+    await expect(qa.getByLabel("Track as stock")).not.toBeChecked();
+    await expect(qa.getByLabel("Quantity")).toHaveCount(0);
+    await expect(qa.getByRole("button", { name: "Add several separate items…" })).toBeVisible();
+
+    await qa.getByLabel("Category").click();
+    await page.getByRole("option", { name, exact: true }).click();
+    // The category's default: ticked, with a quantity, and no several-items shortcut.
+    await expect(qa.getByLabel("Track as stock")).toBeChecked();
+    await expect(qa.getByLabel("Quantity")).toHaveValue("1");
+    await expect(qa.getByRole("button", { name: "Add several separate items…" })).toHaveCount(0);
+    // It can be unticked for a single item (an oscilloscope in a components category)...
+    await qa.getByLabel("Track as stock").uncheck();
+    await expect(qa.getByLabel("Quantity")).toHaveCount(0);
+    // ...and ticked again.
+    await qa.getByLabel("Track as stock").check();
+    await qa.getByLabel("Model / description").fill(`Capacitor ${RUN}`);
+    await qa.getByLabel("Value", { exact: true }).fill("10uF");
+    await qa.getByLabel("Quantity").fill("1000");
+    await qa.getByRole("button", { name: "Save & edit" }).click();
+    await page.waitForURL(/\/items\/\d+$/);
+    const id = Number(page.url().split("/").pop());
+    created.push(id);
+    const saved = await (await request.get(`/api/v1/items/${id}`)).json();
+    expect(saved.is_stock).toBe(true);
+    expect(saved.quantity).toBe(1000);
+
+    // The Stock panel: take 10 out of 1000.
+    const panel = page.getByRole("region", { name: "Stock" });
+    await expect(panel).toContainText("1,000");
+    await panel.getByLabel("How many").fill("10");
+    await panel.getByLabel("What for (optional)").fill("amp build");
+    await panel.getByRole("button", { name: "Take out" }).click();
+    await expect(page.getByText("Took out 10: 990 left")).toBeVisible();
+    await expect(panel).toContainText("990");
+    await expect(panel.getByRole("list", { name: "Stock history" })).toContainText("amp build");
+    // Add some, and the arithmetic holds.
+    await panel.getByLabel("How many").fill("40");
+    await panel.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByText("Added 40: 1,030 left")).toBeVisible();
+    // You cannot take out more than there is.
+    await panel.getByLabel("How many").fill("5000");
+    await expect(panel.getByRole("button", { name: "Take out" })).toBeDisabled();
+    expect((await (await request.get(`/api/v1/items/${id}`)).json()).quantity).toBe(1030);
+
+    // A low-stock level: down to 20 or fewer shows a warning in the panel and the list.
+    await page.getByLabel("Warn me at").fill("50");
+    await page.getByRole("button", { name: "Save", exact: true }).first().click();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    await panel.getByLabel("How many").fill("1000");
+    await panel.getByRole("button", { name: "Take out" }).click();
+    await expect(page.getByText("Took out 1,000: 30 left")).toBeVisible();
+    await expect(panel).toContainText("Running low");
+    await page.goto(`/?q=${encodeURIComponent(`Capacitor ${RUN}`)}`);
+    const row = page.locator(`a[href="/items/${id}"]`);
+    await expect(row).toContainText("×30");
+    await expect(row).toContainText("Low");
+    // The Low stock filter finds it.
+    await page.goto("/?low_stock=1");
+    await expect(page.locator(`a[href="/items/${id}"]`)).toBeVisible();
+  } finally {
+    const left = (await (await request.get(`/api/v1/items?category_id=${cat.id}&limit=50`)).json()).items;
+    for (const i of left) await request.delete(`/api/v1/items/${i.id}`);
+    await request.delete(`/api/v1/categories/${cat.id}`);
+  }
+});
+
+test("A single item can be switched to stock on its page, and the category default is set in the editor", async ({ page, request }) => {
+  const name = `Bins ${RUN}`;
+  const cat = await (await request.post("/api/v1/categories", { data: { name, sort_order: 900 } })).json();
+  try {
+    // The editor: "Start new items as stock items".
+    await page.goto("/categories");
+    await page.getByRole("button", { name: `Fields of ${name}` }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("tab", { name: "Standard details" }).click();
+    const box = dialog.getByLabel("Start new items as stock items");
+    await expect(box).not.toBeChecked(); // off unless asked for
+    await box.check();
+    await dialog.getByRole("button", { name: "Save fields" }).click();
+    await expect(page.getByText(`${name} fields saved`)).toBeVisible();
+    const saved = (await (await request.get("/api/v1/categories")).json()).find((c: { id: number }) => c.id === cat.id);
+    expect(saved.settings.core.stock).toEqual({ show: true });
+
+    // An existing single item becomes a stock item from its own page.
+    const item = await (await request.post("/api/v1/items", { data: { category_id: cat.id, model: `Screws ${RUN}` } })).json();
+    created.push(item.id);
+    await page.goto(`/items/${item.id}`);
+    await expect(page.getByRole("region", { name: "Stock" })).toHaveCount(0);
+    await page.getByLabel("This is a stock item").check();
+    await page.getByLabel("Quantity", { exact: true }).fill("500");
+    await page.getByRole("button", { name: "Save", exact: true }).first().click();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Stock" })).toContainText("500");
+    const log = await (await request.get(`/api/v1/items/${item.id}/stock-log`)).json();
+    expect(log[0]).toMatchObject({ change: 500, quantity_after: 500, note: "Started tracking as stock" });
+  } finally {
+    const left = (await (await request.get(`/api/v1/items?category_id=${cat.id}&limit=50`)).json()).items;
+    for (const i of left) await request.delete(`/api/v1/items/${i.id}`);
+    await request.delete(`/api/v1/categories/${cat.id}`);
+  }
+});
+
+test("A category can hide condition values and call the others what it likes", async ({ page, request }) => {
+  const name = `Salvage ${RUN}`;
+  const cat = await (await request.post("/api/v1/categories", { data: { name, sort_order: 900 } })).json();
+  try {
+    await page.goto("/categories");
+    await page.getByRole("button", { name: `Fields of ${name}` }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("tab", { name: "Standard details" }).click();
+    await dialog.getByText("Rename the values").first().click();
+    await dialog.getByLabel("Offer Poor").uncheck();
+    await dialog.getByLabel("Offer Excellent").uncheck();
+    await dialog.getByLabel("Name for Good").fill("Salvaged (re-use)");
+    await dialog.getByLabel("Name for New / Sealed").fill("New");
+    await dialog.getByRole("button", { name: "Save fields" }).click();
+    await expect(page.getByText(`${name} fields saved`)).toBeVisible();
+    const saved = (await (await request.get("/api/v1/categories")).json()).find((c: { id: number }) => c.id === cat.id);
+    expect(saved.settings.hidden.condition.sort()).toEqual(["Excellent", "Poor"]);
+
+    // Quick add offers only what the category uses, under its own names.
+    await page.goto("/");
+    await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+    await page.keyboard.press("n");
+    const qa = page.getByRole("dialog");
+    await qa.getByLabel("Category").click();
+    await page.getByRole("option", { name, exact: true }).click();
+    await qa.getByLabel("Condition").click();
+    await expect(page.getByRole("option", { name: "Salvaged (re-use)" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "New", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Poor", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: "Excellent", exact: true })).toHaveCount(0);
+    await page.getByRole("option", { name: "Salvaged (re-use)" }).click();
+    await qa.getByLabel("Model / description").fill(`Pulled cap ${RUN}`);
+    await qa.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/Added [A-Z]+-\d+/)).toBeVisible();
+    const item = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(`Pulled cap ${RUN}`)}&limit=1`)).json()).items[0];
+    created.push(item.id);
+    expect(item.condition).toBe("Good"); // stored under the slot's own value
+  } finally {
+    const left = (await (await request.get(`/api/v1/items?category_id=${cat.id}&limit=50`)).json()).items;
+    for (const i of left) await request.delete(`/api/v1/items/${i.id}`);
+    await request.delete(`/api/v1/categories/${cat.id}`);
+  }
+});
+
+test("Labels: print barcode labels for selected items, or for one item from its page", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const prefix = `Label thing ${RUN}`;
+  const items: { id: number; inventory_code: string }[] = [];
+  for (let i = 0; i < 3; i++) items.push(await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${prefix} ${i}`, manufacturer: "Acme" } })).json());
+  created.push(...items.map((i) => i.id));
+
+  // From the inventory: tick two items, press Labels.
+  await page.goto(`/?q=${encodeURIComponent(prefix)}`);
+  const boxes = page.getByRole("checkbox", { name: /^Select [A-Z0-9]+-\d+/ });
+  await expect(boxes).toHaveCount(3);
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  await page.getByRole("region", { name: "Bulk actions" }).getByRole("button", { name: "Labels" }).click();
+  await expect(page.getByRole("heading", { name: "Print labels" })).toBeVisible();
+  const labels = page.getByTestId("label");
+  await expect(labels).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Print 2 labels" })).toBeVisible();
+  // Each label: a barcode of the item's own code, the code, and the name.
+  const first = labels.first();
+  const code = (await first.locator("div.font-mono").innerText()).trim();
+  expect(items.map((i) => i.inventory_code)).toContain(code);
+  await expect(first.getByRole("img", { name: `Barcode ${code}` })).toBeVisible();
+  await expect(first).toContainText("Acme");
+  expect(await first.locator("svg rect").count()).toBeGreaterThan(30); // real bars, not an empty box
+
+  // A different label size changes the label and is remembered.
+  const before = await first.boundingBox();
+  await page.getByLabel("Label size").click();
+  await page.getByRole("option", { name: /62 × 29 mm/ }).click();
+  const after = await labels.first().boundingBox();
+  expect(Math.round(after!.width / before!.width * 100)).toBeLessThan(100);
+  await page.reload();
+  await expect(page.getByLabel("Label size")).toContainText("62 × 29");
+  await page.getByLabel("Label size").click();
+  await page.getByRole("option", { name: /A4 sheet/ }).click();
+
+  // On paper: only the labels, none of the app around them.
+  await page.emulateMedia({ media: "print" });
+  await expect(page.getByRole("banner")).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Print labels" })).toBeHidden();
+  await expect(labels.first()).toBeVisible();
+  await page.emulateMedia({ media: "screen" });
+
+  // From one item's page.
+  await page.goto(`/items/${items[2].id}`);
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Print label" }).click();
+  await expect(page).toHaveURL(new RegExp(`/labels\\?ids=${items[2].id}$`));
+  await expect(page.getByTestId("label")).toHaveCount(1);
+  await expect(page.getByRole("img", { name: `Barcode ${items[2].inventory_code}` })).toBeVisible();
+});
+
+test("Scanning: a code typed into the search box, or scanned anywhere, opens the item", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Scan me ${RUN}` } })).json();
+  created.push(item.id);
+  const code: string = item.inventory_code;
+
+  // 1. In the search box: Enter on a full code opens the item; Enter on other text is just a search.
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  await page.locator("#search-input").fill("scan me");
+  await page.locator("#search-input").press("Enter");
+  await expect(page).toHaveURL(/\/\?q=scan\+me|\/\?q=scan%20me/);
+  await page.locator("#search-input").fill(code.toLowerCase());
+  await page.locator("#search-input").press("Enter");
+  await page.waitForURL(`**/items/${item.id}`);
+
+  // 2. Anywhere else: a scanner types the code in a burst and presses Enter.
+  await page.goto("/locations");
+  await expect(page.getByRole("heading", { name: "Locations" }).first()).toBeVisible();
+  await page.keyboard.type(code, { delay: 5 });
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/items/${item.id}`);
+  await expect(page.getByText(`Found ${code}`)).toBeVisible();
+
+  // A code nobody has is reported, not ignored.
+  await page.goto("/locations");
+  await expect(page.getByRole("heading", { name: "Locations" }).first()).toBeVisible();
+  await page.keyboard.type("ZZ-999999", { delay: 5 });
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("No item has the code ZZ-999999")).toBeVisible();
+
+  // Slow typing by a person is not a scan.
+  await page.goto("/locations");
+  await expect(page.getByRole("heading", { name: "Locations" }).first()).toBeVisible();
+  await page.keyboard.type(code, { delay: 150 });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  await expect(page).toHaveURL(/\/locations/);
+});
+
+test("A scanner's letters do not trigger keyboard shortcuts, a single key still does", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  // A burst that contains "n" and "/" and "?" (as a code might) must not open Quick add, the help or the search.
+  await page.keyboard.type("n/?AB-000123x", { delay: 5 });
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator("#search-input")).not.toBeFocused();
+  // One deliberate key does.
+  await page.keyboard.press("n");
+  await expect(page.getByRole("dialog", { name: "Quick add" })).toBeVisible();
+});
+
+test("The original barcode: entered when adding, used by labels and scans, with the item's own code as the fallback", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const ean = `50${Date.now().toString().slice(-11)}`;
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(`Boxed ${RUN}`);
+  await qa.getByRole("button", { name: "Add barcode" }).click();
+  const field = qa.getByLabel("Barcode");
+  await field.fill(ean);
+  // A scanner presses Enter after the code: that must not save the item.
+  await field.press("Enter");
+  await expect(qa).toBeVisible();
+  await expect(qa.getByRole("alert")).toHaveCount(0);
+  await qa.getByRole("button", { name: "Save & edit" }).click();
+  await page.waitForURL(/\/items\/\d+$/);
+  const id = Number(page.url().split("/").pop());
+  created.push(id);
+  expect((await (await request.get(`/api/v1/items/${id}`)).json()).barcode).toBe(ean);
+  await expect(page.getByLabel("Barcode")).toHaveValue(ean);
+
+  // Its label carries the original barcode (with the item's own code in small print)...
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Print label" }).click();
+  await expect(page.getByRole("img", { name: `Barcode ${ean}` })).toBeVisible();
+  // ...and a plain item's label carries its own code.
+  const plain = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Plain ${RUN}` } })).json();
+  created.push(plain.id);
+  await page.goto(`/labels?ids=${plain.id}`);
+  await expect(page.getByRole("img", { name: `Barcode ${plain.inventory_code}` })).toBeVisible();
+
+  // Scanning the original barcode finds the item, in the search box and anywhere else.
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  await page.locator("#search-input").fill(ean);
+  await page.locator("#search-input").press("Enter");
+  await page.waitForURL(`**/items/${id}`);
+  await page.goto("/locations");
+  await expect(page.getByRole("heading", { name: "Locations" }).first()).toBeVisible();
+  await page.keyboard.type(ean, { delay: 5 });
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/items/${id}`);
+
+  // Identical boxed items share a barcode: the scan shows them all instead of picking one.
+  const twin = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Boxed twin ${RUN}`, barcode: ean } })).json();
+  created.push(twin.id);
+  await page.goto("/locations");
+  await expect(page.getByRole("heading", { name: "Locations" }).first()).toBeVisible();
+  await page.keyboard.type(ean, { delay: 5 });
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("2 items have this barcode")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/\\?q=${ean}`));
+  await expect(page.locator(`a[href="/items/${id}"]`)).toBeVisible();
+  await expect(page.locator(`a[href="/items/${twin.id}"]`)).toBeVisible();
 });

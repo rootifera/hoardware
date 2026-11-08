@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCheck, Download, Loader2, MapPinned, NotebookPen, Trash2, X } from "lucide-react";
+import { CheckCheck, Download, Loader2, MapPinned, NotebookPen, Printer, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
@@ -52,6 +53,7 @@ export function toBulkFilter(f: ItemFilters): BulkFilter {
     location_id: f.unassigned || !f.location ? null : Number(f.location),
     include_descendants: !f.exact,
     unassigned: f.unassigned,
+    low_stock: f.lowStock,
     never_verified: f.verified === "never",
     verified_before: f.verified && f.verified !== "never" ? daysAgo(Number(f.verified)) : null,
   };
@@ -241,6 +243,7 @@ export function BulkBar({
   const [notes, setNotes] = useState(false);
   const [pending, setPending] = useState<{ label: string; changes: BulkChanges } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
   const [exporting, setExporting] = useState(false);
   async function exportCsv() {
     setExporting(true);
@@ -334,6 +337,18 @@ export function BulkBar({
         </Button>
         <Button variant="outline" size="sm" disabled={apply.isPending || exporting} title="Download the selected items as a CSV file" onClick={() => void exportCsv()}>
           {exporting ? <Loader2 className="animate-spin" /> : <Download />} Export
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={apply.isPending}
+          title="Print barcode labels for the selected items"
+          onClick={() => {
+            sessionStorage.setItem("hoardware.labels", JSON.stringify(selection));
+            router.push("/labels");
+          }}
+        >
+          <Printer /> Labels
         </Button>
         <Button variant="outline" size="sm" className="text-destructive" disabled={apply.isPending} onClick={() => setDeleting(true)}>
           <Trash2 /> Delete…

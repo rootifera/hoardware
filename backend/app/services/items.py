@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.enums import Condition, IdentificationConfidence, TestStatus
 from app.models import Category, Item, Location
+from app.services import appsettings
 
 MAX_TOKENS = 8
 _NUMERIC = re.compile(r"^(?:hw-?)?(\d{1,9})$")
@@ -30,6 +31,7 @@ class ItemFilters:
     unassigned: bool = False
     never_verified: bool = False
     verified_before: date | None = None  # verified earlier than this, or never
+    low_stock: bool = False  # stock items at or under their low-stock level
 
 
 def _like_escape(value: str) -> str:
@@ -47,14 +49,18 @@ def base_select(*columns) -> Select:
 
 def apply_filters(session: Session, stmt: Select, f: ItemFilters) -> Select:
     if f.q:
+        prefix = appsettings.code_prefix(session)
         tokens = f.q.lower().split()[:MAX_TOKENS]
         for token in tokens:
             # search_text is lowercase and trigram-indexed, so substring
             # matches on every token stay index-assisted.
             clause = Item.search_text.like(f"%{_like_escape(token)}%", escape="\\")
+            # A scanned barcode typed into the search box finds the items that carry it.
+            if len(token) >= 4:
+                clause = or_(clause, func.lower(Item.barcode) == token)
             numeric = _NUMERIC.match(token)
             if numeric:
-                clause = or_(clause, Item.inventory_code == f"HW-{int(numeric.group(1)):06d}")
+                clause = or_(clause, Item.inventory_code == f"{prefix}-{int(numeric.group(1)):06d}")
             stmt = stmt.where(clause)
 
     if f.category_ids:
@@ -67,6 +73,9 @@ def apply_filters(session: Session, stmt: Select, f: ItemFilters) -> Select:
         stmt = stmt.where(Item.test_status.in_([s.value for s in f.test_statuses]))
     if f.confidences:
         stmt = stmt.where(Item.identification_confidence.in_([c.value for c in f.confidences]))
+
+    if f.low_stock:
+        stmt = stmt.where(Item.is_stock.is_(True), Item.low_stock_level.is_not(None), Item.quantity <= Item.low_stock_level)
 
     if f.never_verified:
         stmt = stmt.where(Item.verified_on.is_(None))

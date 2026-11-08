@@ -74,3 +74,29 @@ def test_export_selected_only(client, make_item):
     rows = list(csv.DictReader(io.StringIO(r.text)))
     assert [x["model"] for x in rows] == ["Alpha", "Gamma"]
     assert rows[1]["manufacturer"].startswith("'=")  # formula protection still applies
+
+
+def test_labels_for_a_selection(client, make_item, make_location):
+    shelf = make_location("Shelf")
+    a = make_item("Pentium MMX", manufacturer="Intel", location_id=shelf["id"])
+    b = make_item("Voodoo3")
+    make_item("Not selected")
+    r = client.post(f"{API}/items/labels", json={"ids": [b["id"], a["id"]]})
+    assert r.status_code == 200
+    got = r.json()
+    assert [x["id"] for x in got] == sorted([a["id"], b["id"]])  # in code order, whatever order was asked
+    first = next(x for x in got if x["id"] == a["id"])
+    assert first["inventory_code"] == a["inventory_code"] and first["manufacturer"] == "Intel" and first["model"] == "Pentium MMX"
+    assert first["location_path"] == "Shelf" and first["category_name"]
+    assert next(x for x in got if x["id"] == b["id"])["location_path"] is None
+
+
+def test_labels_are_capped(client, monkeypatch):
+    from app.routers import bulk
+
+    monkeypatch.setattr(bulk, "MAX_LABELS", 2)
+    for i in range(3):
+        client.post(f"{API}/items", json={"category_id": client.get(f"{API}/categories").json()[0]["id"], "model": f"x{i}"})
+    ids = [i["id"] for i in client.get(f"{API}/items").json()["items"]]
+    assert client.post(f"{API}/items/labels", json={"ids": ids}).status_code == 422
+    assert client.post(f"{API}/items/labels", json={"ids": ids[:2]}).status_code == 200

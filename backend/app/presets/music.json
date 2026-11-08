@@ -1,0 +1,453 @@
+{
+  "key": "music",
+  "name": "Music gear",
+  "description": "Synthesizers, pedals, amplifiers, guitars and studio equipment. \"Test status\" becomes \"Works?\".",
+  "code_prefix": "MG",
+  "categories": [
+    {
+      "name": "Synthesizers",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Analog",
+          "column": null,
+          "options": [
+            "Analog",
+            "Digital",
+            "Hybrid",
+            "Virtual analog",
+            "Sampler",
+            "Drum machine",
+            "Groovebox",
+            "Workstation",
+            "Module"
+          ]
+        },
+        {
+          "name": "Keys",
+          "hint": "e.g. 61",
+          "column": null,
+          "options": [
+            "25",
+            "32",
+            "37",
+            "49",
+            "61",
+            "76",
+            "88",
+            "None"
+          ]
+        },
+        {
+          "name": "Polyphony",
+          "hint": "e.g. 8 voices",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1984",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "MIDI",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Yes",
+            "No",
+            "In only",
+            "Out only"
+          ]
+        },
+        {
+          "name": "Power",
+          "hint": "e.g. 9V DC, mains",
+          "column": null,
+          "options": [
+            "Mains",
+            "9V DC",
+            "12V DC",
+            "Batteries",
+            "USB"
+          ]
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Effects pedals",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Delay",
+          "column": null,
+          "options": [
+            "Overdrive",
+            "Distortion",
+            "Fuzz",
+            "Delay",
+            "Reverb",
+            "Chorus",
+            "Phaser",
+            "Flanger",
+            "Tremolo",
+            "Compressor",
+            "EQ",
+            "Wah",
+            "Looper",
+            "Pitch",
+            "Multi-effects",
+            "Tuner",
+            "Volume",
+            "Other"
+          ]
+        },
+        {
+          "name": "Circuit",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Analog",
+            "Digital",
+            "Hybrid"
+          ]
+        },
+        {
+          "name": "Power",
+          "hint": "e.g. 9V DC",
+          "column": null,
+          "options": [
+            "9V DC",
+            "9V battery",
+            "12V DC",
+            "18V DC",
+            "24V DC"
+          ]
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1998",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Amplifiers",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Combo",
+          "column": null,
+          "options": [
+            "Combo",
+            "Head",
+            "Cabinet",
+            "Rack amp",
+            "Preamp",
+            "Headphone amp",
+            "Power amp"
+          ]
+        },
+        {
+          "name": "Technology",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Tube",
+            "Solid state",
+            "Hybrid",
+            "Modeling"
+          ]
+        },
+        {
+          "name": "Power",
+          "hint": "e.g. 50W",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Speaker",
+          "hint": "e.g. 1x12",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Channels",
+          "hint": "e.g. 2",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1976",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Guitars & basses",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Electric guitar",
+          "column": null,
+          "options": [
+            "Electric guitar",
+            "Acoustic guitar",
+            "Classical guitar",
+            "Bass",
+            "Ukulele",
+            "Other"
+          ]
+        },
+        {
+          "name": "Strings",
+          "hint": "",
+          "column": null,
+          "options": [
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "12"
+          ]
+        },
+        {
+          "name": "Body",
+          "hint": "e.g. Alder",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Neck",
+          "hint": "e.g. Maple",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Finish",
+          "hint": "e.g. Sunburst",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1992",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Serial number",
+          "hint": "",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Playable?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Plays, needs work",
+            "Full Test": "Plays well",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Studio & outboard",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Audio interface",
+          "column": null,
+          "options": [
+            "Mixer",
+            "Audio interface",
+            "Preamp",
+            "Compressor",
+            "EQ",
+            "Reverb unit",
+            "Effects processor",
+            "Sampler",
+            "Tape machine",
+            "Monitor",
+            "Microphone",
+            "Controller",
+            "Other"
+          ]
+        },
+        {
+          "name": "Channels",
+          "hint": "e.g. 8",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Connections",
+          "hint": "e.g. XLR, TRS, ADAT",
+          "column": null,
+          "options": [
+            "XLR",
+            "TRS",
+            "TS",
+            "RCA",
+            "USB",
+            "ADAT",
+            "S/PDIF",
+            "MIDI"
+          ]
+        },
+        {
+          "name": "Power",
+          "hint": "e.g. mains",
+          "column": null,
+          "options": [
+            "Mains",
+            "12V DC",
+            "9V DC",
+            "USB",
+            "Phantom"
+          ]
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1995",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Cables & accessories",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Patch cable",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Length",
+          "hint": "e.g. 2 m",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Connectors",
+          "hint": "e.g. TS to TS",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "stock": {
+            "show": true
+          }
+        },
+        "values": {}
+      }
+    },
+    {
+      "name": "Other",
+      "fields": [],
+      "settings": {
+        "core": {
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    }
+  ]
+}

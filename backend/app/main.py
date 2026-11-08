@@ -7,7 +7,7 @@ from sqlalchemy.exc import DataError
 from app.auth import auth_enabled, require_auth
 from app.config import get_settings
 from app.routers import auth as auth_router
-from app.routers import bulk, categories, files, imports, items, locations, misc, photos, reference, testlog
+from app.routers import bulk, categories, files, imports, items, locations, misc, photos, reference, setup, stock, testlog
 
 API_PREFIX = "/api/v1"
 log = logging.getLogger("hoardware")
@@ -26,7 +26,7 @@ app = FastAPI(
     dependencies=[Depends(require_auth)],
 )
 
-for module in (auth_router, categories, locations, bulk, items, photos, files, reference, testlog, imports, misc):
+for module in (auth_router, setup, categories, locations, bulk, stock, items, photos, files, reference, testlog, imports, misc):
     app.include_router(module.router, prefix=API_PREFIX)
 
 

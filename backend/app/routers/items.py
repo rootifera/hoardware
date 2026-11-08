@@ -3,7 +3,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,11 +22,13 @@ from app.schemas import (
     ItemUpdate,
     Page,
     PhotoOut,
+    ScanMatch,
 )
 from app.services import items as item_service
 from app.services import reference as reference_service
 from app.services.testlog import log_test
 from app.services.items import ItemFilters
+from app.services import stock as stock_service
 from app.services.photos import process_pending_deletions, queue_deletions
 from app.storage import StorageError, get_storage
 
@@ -76,6 +78,10 @@ SUMMARY_COLUMNS = (
     Item.location_id,
     Location.full_name.label("location_path"),
     Item.order,
+    Item.is_stock,
+    Item.quantity,
+    Item.low_stock_level,
+    Item.barcode,
     Item.created_at,
     Item.updated_at,
     Item.sort_name,
@@ -114,6 +120,7 @@ def _filters(
     unassigned: bool = False,
     never_verified: bool = False,
     verified_before: date | None = None,
+    low_stock: bool = False,
 ) -> ItemFilters:
     return ItemFilters(
         q=q.strip() if q else None,
@@ -127,6 +134,7 @@ def _filters(
         unassigned=unassigned,
         never_verified=never_verified,
         verified_before=verified_before,
+        low_stock=low_stock,
     )
 
 
@@ -268,6 +276,20 @@ def test_status_facets(session: SessionDep, filters: FiltersDep):
     return {status.value: counts.get(status.value, 0) for status in TestStatus}
 
 
+@router.get("/lookup", response_model=list[ScanMatch])
+def lookup_scan(session: SessionDep, code: Annotated[str, Query(min_length=1, max_length=100)]):
+    """What a scan finds: the item with that inventory code, plus every item whose original barcode
+    is that value (several can share one). Case does not matter."""
+    value = code.strip()
+    rows = session.execute(
+        select(Item.id, Item.inventory_code, Item.manufacturer, Item.model, Item.barcode)
+        .where(or_(Item.inventory_code == value.upper(), func.lower(Item.barcode) == value.lower()))
+        .order_by(Item.id)
+        .limit(20)
+    ).all()
+    return [ScanMatch(id=r[0], inventory_code=r[1], manufacturer=r[2], model=r[3], barcode=r[4]) for r in rows]
+
+
 @router.get("/by-code/{inventory_code}", response_model=ItemDetail)
 def get_item_by_code(inventory_code: str, session: SessionDep):
     item_id = session.scalar(select(Item.id).where(Item.inventory_code == inventory_code.upper()))
@@ -293,6 +315,8 @@ def create_item(body: ItemCreate, session: SessionDep):
     session.flush()
     if item.test_status != TestStatus.UNTESTED.value:
         log_test(session, item, item.test_status, item.test_notes)
+    if item.is_stock and item.quantity:
+        stock_service.record(session, item.id, item.quantity, item.quantity, "Starting stock")
     _commit_or_position_conflict(session)
     return load_detail(session, item.id)
 
@@ -381,10 +405,16 @@ def update_item(item_id: int, body: ItemUpdate, session: SessionDep):
     if "order" in changes or "location_id" in changes:
         item_service.ensure_position_free(session, new_location, new_order, item_id)
     previous_status = item.test_status
+    was_stock, previous_quantity = item.is_stock, item.quantity
     for name, value in changes.items():
         setattr(item, name, value.value if hasattr(value, "value") else value)
     if item.test_status != previous_status:
         log_test(session, item, item.test_status, item.test_notes)
+    # The history of a stock item also records changes made by editing the quantity itself.
+    if item.is_stock and not was_stock and item.quantity:
+        stock_service.record(session, item.id, item.quantity, item.quantity, "Started tracking as stock")
+    elif item.is_stock and was_stock and item.quantity != previous_quantity:
+        stock_service.record(session, item.id, item.quantity - previous_quantity, item.quantity, "Quantity edited")
     _commit_or_position_conflict(session)
     return load_detail(session, item_id)
 

@@ -57,10 +57,41 @@ Everyday use needs no internet access. (Building the images does.)
 - **Downloads**: each item has a *Downloads* section for manuals, drivers, firmware/BIOS, tools and datasheets. Drop files on it (up to `MAX_FILE_BYTES`, 1 GB by default); each file gets a kind (guessed from the extension, changeable), a description (version, OS…) and a download link. Files are always sent as attachments, never opened in the browser, and are stored (and streamed) via the same photo storage, S3 when configured.
 - **Every physical item is its own record** with its own code (`HW-000001`, never reused), so identical parts can differ in location, condition and test result.
 - **Locations**: a tree (`Workshop > Shelf 2 > CPU Box 3`); moving or renaming a location updates everything inside it.
-- **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Copies** = 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
+- **Exact location = location + position**: create a location, then locations inside it (each can have a free-text type: shelf, box, drawer…). An item's *Position* is its exact spot inside its location, and two items can't share one. Quick add with **Add several separate items…** set to 10 and **Position** = 1 puts ten identical CPUs, as ten separate items, at positions 1–10; *Save & add another* carries on from 11. Sibling locations may share a name.
 - **Stock-take**: each item records when it was last *verified* (seen in place). Tick what is physically there and press **Verified** in the bulk bar, then use the *Last verified* filter (or the *Stock-take* filter on a location's page) to list what has not been seen in 30/90/365 days, or never. **Print list** on a location's page gives a printable, position-ordered sheet with a tick box per item, grouped by sub-location, for checking on paper.
 - **Bulk actions**: tick rows (shift-click selects a range, or *Select all N matching* for everything the filters match) and a bar appears above the list and stays in view while you scroll: set the test status, condition, category or test notes, mark **Verified**, **Move…** to a location, **Export** the selected items as a CSV, or **Delete…** them (with their photos and files; a large deletion has to be confirmed by typing *delete*). When moving you choose what happens to positions: clear them, number on after the last one in the destination, or keep them (refused if any would clash, with a count shown before you commit). On a location's page, **Move all items…** moves everything out of it.
 - **CSV export and import**: the **CSV** button exports the current filter (streamed, so it works at any size). **Import** takes a CSV (the export's columns, a template is provided, and friendly header names such as `name`, `p/n` work too), checks every row first and shows the problems by line, and writes nothing until you confirm. It is all-or-nothing unless you tick *Skip rows with errors*; *Create missing categories/locations* fill in what the file refers to. Every row becomes a new item with a new code.
+
+## Barcode labels and scanning
+
+Every item has its own unique code (`HW-000123`, or your own prefix), and that code is the barcode unless you give the item one of its own:
+
+- **Original barcode (optional).** If an item came with a barcode (the EAN/UPC on the packaging) enter it as **Barcode** ("Add barcode" in Quick add, or on the item page; it also goes in the CSV as `barcode`, `ean` or `upc`). Without one, labels and scans use the item's own code. Several items may share a barcode (identical boxed parts).
+- **Print labels:** **Print label** in an item's ⋯ menu, or **Labels** in the bulk bar for everything you have selected (or "Select all N matching", up to 1,000 at a time). Each label has a Code 128 barcode (any scanner reads it) of the item's original barcode, or of its own code if it has none, with the text and the item's name. Choose an A4 label sheet (3 across, 63.5 × 38.1 mm) or a label printer size (62 × 29, 50 × 25, 89 × 36 mm) and press Print. Use 100% / "Actual size" and turn off headers and footers in the print dialog.
+- **Scan to find:** with a USB scanner (they type the code and press Enter), scan anywhere in the app and the item opens: in the search box, or on any page where no text field has focus. If several items carry the scanned barcode, the list of them is shown instead. Typing a code into the search box and pressing Enter does the same. A scan is recognised by its speed, so a person typing slowly is not mistaken for one, and a scanner's letters never trigger the one-key shortcuts (`n`, `/`, `?`).
+- With **Track as stock**, scan a bin, then **Take out** on the item page.
+
+## Standard or your own collection
+
+Hoardware is built for PC hardware, but nothing forces you to keep PC hardware. The first time you sign in to an empty install it asks:
+
+- **PC hardware (standard):** the CPU, GPU, motherboard, sound card, RAM and storage categories with ready-made fields and predefined values, and the CPU and graphics lookups.
+- **Something else (customise):** pick a starter set, name your collection and choose the item code prefix (`MG-000001`, `TC-000001`…). The sets are **Music gear**, **Trading cards & collectibles**, **Electronics & components** and **Start empty** (one empty category to build on). The choice only decides where you start: everything stays editable.
+
+A custom setup replaces the standard categories, so it is only offered while there are no items. You can add any starter set later from **Categories → Add a starter set…** (including the PC one); that only adds categories you do not have yet. Installs that already have items count as set up and are not asked.
+
+**Customising a category.** On the Categories page, *Fields* has two tabs. *Specifications* is the category's own fields with their predefined values. *Standard details* decides which of the standard fields the category shows and what they are called: hide the manufacturer, part number, condition, test status, notes or dates where they make no sense (a trading card is not "tested"), rename them ("Brand", "Card number", "Works?"), and show condition and test-status values under other names ("Near mint", "Powers on"). Quick add, the item page, the inventory list and its filters all follow. Hiding only removes a field from the screens: anything already entered is kept, and the stored values never change.
+
+**Track as stock.** Some things you count instead of listing one by one: capacitors, screws, blank CDs, cables. Tick **Track as stock** (in Quick add, or on the item page) and the item becomes one record with a quantity: "1000 × 10 µF". A stock item gets:
+
+- a **Stock** panel on its page: type how many and press **Take out** (1000 becomes 990) or **Add**, optionally with what it was for; it cannot go below zero, and two people taking at the same moment can never take the same piece;
+- a **history** of every change (what, how many, when, what for, what was left), including quantities you set by hand after a recount;
+- an optional **Warn me at** level: at or under it the list shows **Low** (and **Out** at zero), the panel warns, and the **Low stock** filter lists everything that needs restocking;
+- a "×990" tag in the list and on the item page, and a `quantity` column in the CSV export and import (`qty` works too; a row with a quantity becomes a stock item).
+
+Whether the box starts ticked is a per-category default (*Standard details → Start new items as stock items*): the electronics components and tools, music cables, trading-card-game and sealed-product starter categories start ticked, PC categories do not, and you can untick it for a one-off item such as an oscilloscope. Where an item is not stock, Quick add still offers **Add several separate items…** for things like ten identical CPUs, each getting its own code and position. Setting a stock quantity to 0 keeps the record.
+
+Starter sets are plain JSON files in `backend/app/presets/`, so adding one for another hobby means adding a file.
 
 ## Versions and updates
 

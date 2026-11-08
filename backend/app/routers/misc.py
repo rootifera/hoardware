@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_session
@@ -128,6 +128,8 @@ EXPORT_COLUMNS = [
     "test_notes",
     "location",
     "position",
+    "quantity",
+    "barcode",
     "notes",
     "acquired_on",
     "verified_on",
@@ -179,6 +181,8 @@ def items_csv_response(filters, ids: list[int] | None = None) -> StreamingRespon
                     Item.test_notes,
                     Location.full_name,
                     Item.order,
+                    case((Item.is_stock, Item.quantity), else_=None),
+                    Item.barcode,
                     Item.notes,
                     Item.acquired_on,
                     Item.verified_on,

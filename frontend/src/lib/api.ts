@@ -1,6 +1,8 @@
 import type {
   BulkChanges,
   CategoryField,
+  CategorySettings,
+  StockLogEntry,
   TestLogEntry,
   TestStatus,
   ImportOptions,
@@ -41,6 +43,19 @@ export interface VersionInfo extends VersionRelease {
   /** The newer release published in the git repository, if there is one. */
   update: VersionRelease | null;
   check: { enabled: boolean; checked_at: number | null; error: string | null };
+}
+export interface StarterSet {
+  key: string;
+  name: string;
+  description: string;
+  code_prefix: string;
+  categories: string[];
+}
+export interface SetupState {
+  complete: boolean;
+  title: string;
+  code_prefix: string;
+  presets: StarterSet[];
 }
 export const UNAUTHORIZED_EVENT = "hoardware:unauthorized";
 
@@ -120,6 +135,7 @@ export function filterParams(f: ItemFilters): URLSearchParams {
   if (f.verified === "never") p.set("never_verified", "true");
   else if (f.verified) p.set("verified_before", daysAgo(Number(f.verified)));
   if (f.unassigned) p.set("unassigned", "true");
+  if (f.lowStock) p.set("low_stock", "true");
   else if (f.location) {
     p.set("location_id", f.location);
     if (f.exact) p.set("include_descendants", "false");
@@ -129,8 +145,8 @@ export function filterParams(f: ItemFilters): URLSearchParams {
 
 export const api = {
   categories: () => request<Category[]>("/categories"),
-  createCategory: (body: { name: string; sort_order?: number; fields?: CategoryField[] }) => request<Category>("/categories", json("POST", body)),
-  updateCategory: (id: number, body: { name?: string; sort_order?: number; fields?: CategoryField[] }) =>
+  createCategory: (body: { name: string; sort_order?: number; fields?: CategoryField[]; settings?: CategorySettings }) => request<Category>("/categories", json("POST", body)),
+  updateCategory: (id: number, body: { name?: string; sort_order?: number; fields?: CategoryField[]; settings?: CategorySettings }) =>
     request<Category>(`/categories/${id}`, json("PATCH", body)),
   deleteCategory: (id: number) => request<void>(`/categories/${id}`, { method: "DELETE" }),
 
@@ -191,6 +207,11 @@ export const api = {
     request<void>(`/items/${itemId}/photos/${photoId}`, { method: "DELETE" }),
 
   version: () => request<VersionInfo>("/version"),
+  setup: () => request<SetupState>("/setup"),
+  runSetup: (body: { mode: "standard" | "custom"; preset?: string; title?: string; code_prefix?: string }) =>
+    request<SetupState>("/setup", json("POST", body)),
+  presets: () => request<StarterSet[]>("/presets"),
+  applyPreset: (key: string) => request<{ added: string[] }>(`/presets/${key}/apply`, { method: "POST" }),
   health: () =>
     request<{
       status: string;
@@ -201,6 +222,20 @@ export const api = {
   login: (username: string, password: string) => request<AuthStatus>("/auth/login", json("POST", { username, password })),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
+  labels: (selection: BulkSelection) =>
+    request<{ id: number; inventory_code: string; barcode: string; manufacturer: string | null; model: string; category_name: string; location_path: string | null }[]>(
+      "/items/labels",
+      json("POST", selection),
+    ),
+  /** What a scan finds: the item with that code, and every item carrying that original barcode. */
+  scanLookup: (code: string) =>
+    request<{ id: number; inventory_code: string; manufacturer: string | null; model: string; barcode: string | null }[]>(
+      `/items/lookup?${new URLSearchParams({ code })}`,
+    ),
+  itemByCode: (code: string) => request<{ id: number; inventory_code: string }>(`/items/by-code/${encodeURIComponent(code)}`),
+  stockChange: (itemId: number, change: number, note?: string) =>
+    request<{ quantity: number; entry: StockLogEntry }>(`/items/${itemId}/stock`, json("POST", { change, note: note || null })),
+  stockLog: (itemId: number) => request<StockLogEntry[]>(`/items/${itemId}/stock-log`),
   bulkDelete: (selection: BulkSelection, dryRun = false) =>
     request<{ matched: number; deleted: number; dry_run: boolean }>("/items/bulk-delete", json("POST", { selection, dry_run: dryRun })),
   /** The selected items as a CSV download. */

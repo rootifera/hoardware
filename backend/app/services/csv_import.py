@@ -45,6 +45,8 @@ ALIASES: dict[str, set[str]] = {
     "test_notes": {"test_notes"},
     "location": {"location", "location_path", "where"},
     "position": {"position", "order", "slot", "pos"},
+    "quantity": {"quantity", "qty", "count", "amount", "number"},
+    "barcode": {"barcode", "ean", "upc", "gtin"},
     "notes": {"notes", "note", "comments", "comment"},
     "acquired_on": {"acquired_on", "acquired", "date_acquired", "purchase_date"},
     "verified_on": {"verified_on", "verified", "last_verified"},
@@ -57,7 +59,7 @@ _NONALNUM = re.compile(r"[^a-z0-9]+")
 
 TEMPLATE_HEADER = [
     "category", "manufacturer", "model", "part_number", "revision", "chipset_manufacturer", "chipset",
-    "condition", "test_status", "test_notes", "location", "position", "notes", "acquired_on",
+    "condition", "test_status", "test_notes", "location", "position", "quantity", "barcode", "notes", "acquired_on",
     "verified_on", "identification_confidence", "specs",
 ]
 
@@ -211,6 +213,21 @@ def _validate_row(row: Row) -> None:
         except ValueError:
             row.errors.append('specs must be a JSON object such as {"Socket": "7"}')
 
+    barcode = v.get("barcode") or None
+    if barcode and (len(barcode) > 100 or not all(32 <= ord(ch) < 127 for ch in barcode)):
+        row.errors.append(f"barcode “{barcode[:30]}” must be 100 printable characters at most")
+        barcode = None
+    quantity = 1
+    is_stock = bool(v.get("quantity"))
+    if v.get("quantity"):
+        try:
+            quantity = int(v["quantity"])
+            if not 0 <= quantity <= 1_000_000_000:
+                raise ValueError
+        except ValueError:
+            row.errors.append(f"quantity “{v['quantity']}” must be a whole number from 0 to 1,000,000,000")
+            quantity = 1
+
     row.location_parts = _split_location(v["location"]) if v.get("location") else None
     if v.get("position"):
         try:
@@ -240,6 +257,9 @@ def _validate_row(row: Row) -> None:
         "attributes": specs,
         "identification_confidence": confidence,
         "order": row.position,
+        "quantity": quantity,
+        "is_stock": is_stock,
+        "barcode": barcode,
     }
 
 
@@ -391,6 +411,6 @@ def template_csv() -> str:
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(TEMPLATE_HEADER)
-    writer.writerow(["CPU", "Intel", "Pentium MMX 200", "", "", "", "", "Good", "Full Test", "", "Workshop > CPU Tray", "1", "", "", "", "", '{"Socket":"Socket 7"}'])
-    writer.writerow(["GPU/VGA", "", "Unknown PCI video card", "", "", "", "", "Unknown", "Untested", "Needs a PCI test machine", "", "", "", "", "", "", ""])
+    writer.writerow(["CPU", "Intel", "Pentium MMX 200", "", "", "", "", "Good", "Full Test", "", "Workshop > CPU Tray", "1", "", "", "", "", "", "", '{"Socket":"Socket 7"}'])
+    writer.writerow(["GPU/VGA", "", "Unknown PCI video card", "", "", "", "", "Unknown", "Untested", "Needs a PCI test machine", "", "", "", "", "", "", "", "", ""])
     return out.getvalue()

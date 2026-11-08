@@ -1,0 +1,370 @@
+{
+  "key": "electronics",
+  "name": "Electronics & components",
+  "description": "Components, development boards, test equipment and vintage consumer electronics.",
+  "code_prefix": "EL",
+  "categories": [
+    {
+      "name": "Components",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Capacitor",
+          "column": null,
+          "options": [
+            "Resistor",
+            "Capacitor",
+            "Inductor",
+            "Diode",
+            "Transistor",
+            "MOSFET",
+            "IC",
+            "LED",
+            "Connector",
+            "Switch",
+            "Relay",
+            "Crystal / oscillator",
+            "Sensor",
+            "Fuse",
+            "Other"
+          ]
+        },
+        {
+          "name": "Value",
+          "hint": "e.g. 10k, 100nF",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Package",
+          "hint": "e.g. DIP-8",
+          "column": null,
+          "options": [
+            "Through-hole",
+            "DIP",
+            "SOIC",
+            "QFP",
+            "SOT-23",
+            "TO-92",
+            "TO-220",
+            "0402",
+            "0603",
+            "0805",
+            "1206",
+            "BGA"
+          ]
+        },
+        {
+          "name": "Rating",
+          "hint": "e.g. 25V, 1/4W",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "stock": {
+            "show": true
+          }
+        },
+        "values": {
+          "condition": {
+            "Unknown": "Not checked",
+            "New / Sealed": "New",
+            "Good": "Salvaged (re-use)",
+            "Fair": "Used",
+            "Damaged": "Faulty"
+          }
+        },
+        "hidden": {
+          "condition": [
+            "Excellent",
+            "Poor"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Boards & modules",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Dev board",
+          "column": null,
+          "options": [
+            "Arduino",
+            "Raspberry Pi",
+            "ESP32 / ESP8266",
+            "Dev board",
+            "Breakout",
+            "Shield",
+            "HAT",
+            "FPGA board",
+            "Programmer",
+            "Other"
+          ]
+        },
+        {
+          "name": "MCU or chip",
+          "hint": "e.g. ATmega328P",
+          "column": "chipset",
+          "options": []
+        },
+        {
+          "name": "Revision",
+          "hint": "board revision",
+          "column": "revision",
+          "options": []
+        },
+        {
+          "name": "Voltage",
+          "hint": "",
+          "column": null,
+          "options": [
+            "1.8V",
+            "3.3V",
+            "5V",
+            "12V"
+          ]
+        },
+        {
+          "name": "Interfaces",
+          "hint": "e.g. I2C, SPI, UART",
+          "column": null,
+          "options": [
+            "I2C",
+            "SPI",
+            "UART",
+            "USB",
+            "CAN",
+            "Wi-Fi",
+            "Bluetooth",
+            "Ethernet"
+          ]
+        }
+      ],
+      "settings": {
+        "core": {
+          "confidence": {
+            "show": false
+          },
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Test equipment",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Oscilloscope",
+          "column": null,
+          "options": [
+            "Multimeter",
+            "Oscilloscope",
+            "Power supply",
+            "Signal generator",
+            "Logic analyzer",
+            "LCR meter",
+            "Spectrum analyzer",
+            "Soldering station",
+            "Frequency counter",
+            "Other"
+          ]
+        },
+        {
+          "name": "Range",
+          "hint": "e.g. 100 MHz, 0-30V",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Channels",
+          "hint": "e.g. 2",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Interface",
+          "hint": "",
+          "column": null,
+          "options": [
+            "USB",
+            "GPIB",
+            "LAN",
+            "RS-232",
+            "None"
+          ]
+        },
+        {
+          "name": "Calibrated until",
+          "hint": "e.g. 2027-03",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "confidence": {
+            "show": false
+          },
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Consumer electronics",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Radio",
+          "column": null,
+          "options": [
+            "Radio",
+            "Cassette player",
+            "CD player",
+            "Walkman",
+            "Calculator",
+            "Game console",
+            "Handheld",
+            "TV",
+            "Camera",
+            "Phone",
+            "Computer",
+            "Other"
+          ]
+        },
+        {
+          "name": "Year",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Power",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Mains",
+            "Batteries",
+            "USB",
+            "Rechargeable"
+          ]
+        },
+        {
+          "name": "Region",
+          "hint": "e.g. PAL, NTSC, EU",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "confidence": {
+            "show": false
+          },
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    },
+    {
+      "name": "Tools & accessories",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Size",
+          "hint": "",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "confidence": {
+            "show": false
+          },
+          "test_status": {
+            "show": false
+          },
+          "stock": {
+            "show": true
+          }
+        },
+        "values": {}
+      }
+    },
+    {
+      "name": "Other",
+      "fields": [],
+      "settings": {
+        "core": {
+          "confidence": {
+            "show": false
+          },
+          "test_status": {
+            "label": "Works?"
+          }
+        },
+        "values": {
+          "test_status": {
+            "Unknown": "Not sure",
+            "Untested": "Not checked",
+            "POST": "Powers on",
+            "Full Test": "Fully working",
+            "Dead": "Not working"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Download, Search, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { LocationPicker } from "@/components/location-picker";
 import { SimpleSelect } from "@/components/simple-select";
@@ -9,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api";
+import { looksLikeScan } from "@/lib/scan";
+import { anyShows, coreLabel, coreShown, valueLabel, visibleValues, type CoreKey } from "@/lib/category-config";
 import { cn } from "@/lib/utils";
 import { CONDITIONS, CONFIDENCES, EMPTY_FILTERS, type ItemFilters, type Sort } from "@/lib/types";
 
@@ -89,7 +92,12 @@ export function FilterBar({
   autoFocusSearch?: boolean;
   showLocation?: boolean;
 }) {
+  const router = useRouter();
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories, staleTime: 60_000 });
+  // With one category chosen its own names and hidden fields apply; with all of them a field is
+  // offered as long as some category uses it.
+  const scope = (categories.data ?? []).find((c) => String(c.id) === filters.category);
+  const offers = (key: CoreKey) => (scope ? coreShown(scope, key) : anyShows(categories.data, key));
   const [q, setQ] = useUrlText(filters.q, (value) => setFilters({ q: value }, { replace: true }));
   const [manufacturer, setManufacturer] = useUrlText(filters.manufacturer, (value) =>
     setFilters({ manufacturer: value }, { replace: true }),
@@ -118,7 +126,7 @@ export function FilterBar({
 
   const dirty =
     filters.q || filters.category || filters.manufacturer || filters.condition || filters.test || filters.confidence ||
-    filters.location || filters.unassigned || filters.verified;
+    filters.location || filters.unassigned || filters.verified || filters.lowStock;
   const descending = filters.order ? filters.order === "desc" : filters.sort === "newest";
 
   return (
@@ -135,6 +143,16 @@ export function FilterBar({
           className="h-11 pr-9 pl-9 text-base"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            // Scanning a label (or typing a full code) and pressing Enter opens that item. Anything else is a normal search.
+            if (e.key !== "Enter" || !looksLikeScan(q)) return;
+            e.preventDefault();
+            // One match opens it; several (identical boxed items) stay in the list; none is a normal search.
+            api
+              .scanLookup(q.trim())
+              .then((found) => found.length === 1 && router.push(`/items/${found[0].id}`))
+              .catch(() => {});
+          }}
         />
         {q && (
           <button
@@ -151,17 +169,19 @@ export function FilterBar({
         )}
       </div>
 
+      {offers("test_status") && (
       <div role="group" aria-label="Test status" className="flex flex-wrap items-center gap-1.5">
         <StatusChip active={!filters.test} onClick={() => setFilters({ test: "" })}>
           All
         </StatusChip>
-        {STATUS_CHIPS.map(({ status, hint }) => (
+        {STATUS_CHIPS.filter((c) => visibleValues(scope, "test_status", [c.status], filters.test).length > 0).map(({ status, hint }) => (
           <StatusChip key={status} active={filters.test === status} title={hint} onClick={() => setFilters({ test: filters.test === status ? "" : status })}>
-            {status}{" "}
+            {valueLabel(scope, "test_status", status)}{" "}
             {facets.data && <span className="ml-0.5 tabular-nums opacity-70">{(facets.data[status] ?? 0).toLocaleString()}</span>}
           </StatusChip>
         ))}
       </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <SimpleSelect
@@ -172,38 +192,46 @@ export function FilterBar({
           anyLabel="All categories"
           options={(categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
         />
-        <SimpleSelect
-          aria-label="Condition"
-          className="w-40"
-          value={filters.condition}
-          onChange={(condition) => setFilters({ condition })}
-          anyLabel="Any condition"
-          options={CONDITIONS.map((c) => ({ value: c, label: c }))}
-        />
-        <SimpleSelect
-          aria-label="Identification"
-          className="w-44"
-          value={filters.confidence}
-          onChange={(confidence) => setFilters({ confidence })}
-          anyLabel="Any identification"
-          options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
-        />
-        <SimpleSelect
-          aria-label="Last verified"
-          className="w-48"
-          value={filters.verified}
-          onChange={(verified) => setFilters({ verified })}
-          anyLabel="Any verification"
-          options={VERIFIED_OPTIONS}
-        />
-        <Input
-          aria-label="Manufacturer"
-          list="manufacturer-suggestions"
-          placeholder="Manufacturer"
-          className="w-40"
-          value={manufacturer}
-          onChange={(e) => setManufacturer(e.target.value)}
-        />
+        {offers("condition") && (
+          <SimpleSelect
+            aria-label="Condition"
+            className="w-40"
+            value={filters.condition}
+            onChange={(condition) => setFilters({ condition })}
+            anyLabel={`Any ${coreLabel(scope, "condition", "condition").toLowerCase()}`}
+            options={visibleValues(scope, "condition", CONDITIONS, filters.condition).map((c) => ({ value: c, label: valueLabel(scope, "condition", c) }))}
+          />
+        )}
+        {offers("confidence") && (
+          <SimpleSelect
+            aria-label="Identification"
+            className="w-44"
+            value={filters.confidence}
+            onChange={(confidence) => setFilters({ confidence })}
+            anyLabel="Any identification"
+            options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
+          />
+        )}
+        {offers("verified_on") && (
+          <SimpleSelect
+            aria-label="Last verified"
+            className="w-48"
+            value={filters.verified}
+            onChange={(verified) => setFilters({ verified })}
+            anyLabel="Any verification"
+            options={VERIFIED_OPTIONS}
+          />
+        )}
+        {offers("manufacturer") && (
+          <Input
+            aria-label="Manufacturer"
+            list="manufacturer-suggestions"
+            placeholder={coreLabel(scope, "manufacturer", "Manufacturer")}
+            className="w-40"
+            value={manufacturer}
+            onChange={(e) => setManufacturer(e.target.value)}
+          />
+        )}
         <datalist id="manufacturer-suggestions">
           {(suggestions.data ?? []).map((m) => (
             <option key={m} value={m} />
@@ -241,6 +269,15 @@ export function FilterBar({
             </label>
           </>
         )}
+        <label className="flex items-center gap-2 text-sm" title="Stock items down to their low-stock level">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={filters.lowStock}
+            onChange={(e) => setFilters({ lowStock: e.target.checked })}
+          />
+          Low stock
+        </label>
         <div className="ml-auto flex items-center gap-2">
           <SimpleSelect
             aria-label="Sort by"

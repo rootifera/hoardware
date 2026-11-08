@@ -273,7 +273,7 @@ else
 
   # Reference data
   echo
-  if yes_no "Download and import the CPU and GPU reference data (needs git and internet access)?" y; then
+  if yes_no "Download and import the CPU and GPU reference data (only useful for PC hardware; needs git and internet access)?" y; then
     set_env REFERENCE_DATA yes
   else
     set_env REFERENCE_DATA no

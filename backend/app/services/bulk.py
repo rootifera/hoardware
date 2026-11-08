@@ -35,6 +35,7 @@ def _filters(f: BulkFilter) -> ItemFilters:
         unassigned=f.unassigned,
         never_verified=f.never_verified,
         verified_before=f.verified_before,
+        low_stock=f.low_stock,
     )
 
 

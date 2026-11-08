@@ -38,12 +38,25 @@ export interface CategoryField {
   options: string[];
 }
 
+export interface CoreFieldSetting {
+  show?: boolean | null;
+  label?: string | null;
+}
+/** Which standard fields a category shows and what it calls them and their values. */
+export interface CategorySettings {
+  core: Record<string, CoreFieldSetting>;
+  values: Record<string, Record<string, string>>;
+  /** Values this category does not offer, by field ("condition", "test_status"). */
+  hidden?: Record<string, string[]>;
+}
+
 export interface Category {
   id: number;
   name: string;
   sort_order: number;
   /** The fields items of this category are described with, in order. */
   fields: CategoryField[];
+  settings: CategorySettings;
 }
 
 export interface LocationRef {
@@ -110,6 +123,13 @@ export interface ItemSummary {
   location_path: string | null;
   /** Exact position inside the location (unique per location). */
   order: number | null;
+  /** Stock items are counted (take out / add); everything else is a single item. */
+  is_stock: boolean;
+  /** How many you have (only meaningful for stock items). */
+  quantity: number;
+  low_stock_level: number | null;
+  /** The original barcode (from the packaging), if any. Labels and scans use it, else the item's own code. */
+  barcode: string | null;
   thumbnail_url: string | null;
   /** Key specs of the matched reference model, if any. */
   spec_line: string | null;
@@ -199,6 +219,9 @@ export interface ItemCreate {
   test_status?: TestStatus;
   location_id?: number | null;
   order?: number | null;
+  is_stock?: boolean;
+  quantity?: number;
+  barcode?: string | null;
   notes?: string | null;
   /** Set when a reference suggestion was picked. */
   reference_model_id?: number | null;
@@ -220,6 +243,10 @@ export type ItemUpdate = Partial<
     | "test_notes"
     | "location_id"
     | "order"
+    | "is_stock"
+    | "quantity"
+    | "low_stock_level"
+    | "barcode"
     | "notes"
     | "acquired_on"
     | "verified_on"
@@ -241,6 +268,8 @@ export interface ItemFilters {
   location: string; // location id, "" = any
   exact: boolean; // true = do not include descendant locations
   unassigned: boolean;
+  /** Stock items at or under their low-stock level. */
+  lowStock: boolean;
   /** Stock-take: "" any, "never", or a number of days (not seen within that many). */
   verified: string;
   sort: Sort;
@@ -257,6 +286,7 @@ export const EMPTY_FILTERS: ItemFilters = {
   location: "",
   exact: false,
   unassigned: false,
+  lowStock: false,
   verified: "",
   sort: "newest",
   order: "",
@@ -276,6 +306,7 @@ export interface BulkFilter {
   location_id: number | null;
   include_descendants: boolean;
   unassigned: boolean;
+  low_stock: boolean;
   never_verified: boolean;
   verified_before: string | null;
 }
@@ -325,6 +356,15 @@ export interface ImportOptions {
   skipInvalid: boolean;
   createCategories: boolean;
   createLocations: boolean;
+}
+
+export interface StockLogEntry {
+  id: number;
+  /** Negative = taken out, positive = added. */
+  change: number;
+  quantity_after: number;
+  note: string | null;
+  created_at: string;
 }
 
 export interface TestLogEntry {

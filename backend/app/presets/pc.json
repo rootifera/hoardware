@@ -1,0 +1,613 @@
+{
+  "key": "pc",
+  "name": "PC hardware",
+  "description": "CPUs, graphics cards, motherboards, sound cards, RAM and storage, with predefined values. With the CPU and graphics databases, picking a chip fills in its specs.",
+  "code_prefix": "HW",
+  "categories": [
+    {
+      "name": "CPU",
+      "fields": [
+        {
+          "name": "Family",
+          "hint": "e.g. Pentium MMX",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "S-Spec",
+          "hint": "code on the chip, e.g. SL32A",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Speed",
+          "hint": "e.g. 200MHz",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Bus speed",
+          "hint": "e.g. 66MHz",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "L2 cache",
+          "hint": "e.g. 256KiB",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Socket",
+          "hint": "e.g. Socket 7",
+          "column": null,
+          "options": [
+            "Socket 3",
+            "Socket 4",
+            "Socket 5",
+            "Socket 7",
+            "Super Socket 7",
+            "Socket 8",
+            "Slot 1",
+            "Slot 2",
+            "Slot A",
+            "Socket 370",
+            "Socket 462 (A)",
+            "Socket 478",
+            "Socket 423",
+            "Socket 775",
+            "Socket 939",
+            "Socket 754",
+            "Socket AM2",
+            "Socket AM3"
+          ]
+        },
+        {
+          "name": "Package",
+          "hint": "e.g. SPGA",
+          "column": null,
+          "options": [
+            "PGA",
+            "SPGA",
+            "CPGA",
+            "PPGA",
+            "FC-PGA",
+            "FC-PGA2",
+            "SECC",
+            "SECC2",
+            "SEPP",
+            "PLCC",
+            "PQFP",
+            "DIP"
+          ]
+        },
+        {
+          "name": "Stepping",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Core",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Core voltage",
+          "hint": "e.g. 2.8V",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Process",
+          "hint": "e.g. 350nm",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "CPUID",
+          "hint": "",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "GPU/VGA",
+      "fields": [
+        {
+          "name": "Chipset maker",
+          "hint": "e.g. NVIDIA",
+          "column": "chipset_manufacturer",
+          "options": []
+        },
+        {
+          "name": "Chipset",
+          "hint": "e.g. RIVA TNT2 Ultra",
+          "column": "chipset",
+          "options": []
+        },
+        {
+          "name": "GPU chip",
+          "hint": "e.g. NV5, Avenger",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Revision",
+          "hint": "board revision",
+          "column": "revision",
+          "options": []
+        },
+        {
+          "name": "Memory size",
+          "hint": "e.g. 32 MB",
+          "column": null,
+          "options": [
+            "256KB",
+            "512KB",
+            "1 MB",
+            "2 MB",
+            "4 MB",
+            "8 MB",
+            "16 MB",
+            "32 MB",
+            "64 MB",
+            "128 MB",
+            "256 MB",
+            "512 MB",
+            "1 GB",
+            "2 GB",
+            "4 GB",
+            "8 GB"
+          ]
+        },
+        {
+          "name": "Memory type",
+          "hint": "e.g. SDR, SGRAM",
+          "column": null,
+          "options": [
+            "DRAM",
+            "EDO",
+            "SDR",
+            "SGRAM",
+            "SGR",
+            "DDR",
+            "DDR2",
+            "DDR3",
+            "GDDR3",
+            "GDDR5",
+            "WRAM",
+            "VRAM"
+          ]
+        },
+        {
+          "name": "Memory bus",
+          "hint": "e.g. 128 bit",
+          "column": null,
+          "options": [
+            "32 bit",
+            "64 bit",
+            "128 bit",
+            "192 bit",
+            "256 bit",
+            "384 bit"
+          ]
+        },
+        {
+          "name": "Bus",
+          "hint": "e.g. AGP 4x, PCI, ISA",
+          "column": null,
+          "options": [
+            "ISA 8-bit",
+            "ISA 16-bit",
+            "VLB",
+            "PCI",
+            "AGP 1x",
+            "AGP 2x",
+            "AGP 4x",
+            "AGP 8x",
+            "PCIe x16"
+          ]
+        },
+        {
+          "name": "GPU clock",
+          "hint": "e.g. 150 MHz",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Memory clock",
+          "hint": "e.g. 183 MHz",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Outputs",
+          "hint": "e.g. VGA, DVI",
+          "column": null,
+          "options": [
+            "VGA",
+            "VGA + DVI",
+            "VGA + S-Video",
+            "DVI",
+            "HDMI",
+            "DisplayPort"
+          ]
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "Motherboard",
+      "fields": [
+        {
+          "name": "Chipset",
+          "hint": "e.g. Intel 440BX",
+          "column": "chipset",
+          "options": []
+        },
+        {
+          "name": "Revision",
+          "hint": "board revision",
+          "column": "revision",
+          "options": []
+        },
+        {
+          "name": "Socket",
+          "hint": "e.g. Socket 370",
+          "column": null,
+          "options": [
+            "Socket 3",
+            "Socket 5",
+            "Socket 7",
+            "Super Socket 7",
+            "Socket 8",
+            "Slot 1",
+            "Slot A",
+            "Socket 370",
+            "Socket 462 (A)",
+            "Socket 478",
+            "Socket 775",
+            "Socket 939",
+            "Socket AM2",
+            "Socket AM3"
+          ]
+        },
+        {
+          "name": "Form factor",
+          "hint": "e.g. ATX",
+          "column": null,
+          "options": [
+            "AT",
+            "Baby AT",
+            "ATX",
+            "Micro ATX",
+            "Mini ATX",
+            "NLX",
+            "LPX",
+            "Mini ITX",
+            "Flex ATX"
+          ]
+        },
+        {
+          "name": "Memory type",
+          "hint": "e.g. SDRAM DIMM",
+          "column": null,
+          "options": [
+            "30-pin SIMM",
+            "72-pin SIMM",
+            "SDRAM DIMM",
+            "DDR DIMM",
+            "DDR2 DIMM",
+            "DDR3 DIMM",
+            "RIMM"
+          ]
+        },
+        {
+          "name": "Max memory",
+          "hint": "e.g. 768MB",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Expansion slots",
+          "hint": "e.g. 4x PCI, 1x AGP, 2x ISA",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "BIOS",
+          "hint": "",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "Sound Card",
+      "fields": [
+        {
+          "name": "Chipset",
+          "hint": "e.g. Creative CT1747",
+          "column": "chipset",
+          "options": []
+        },
+        {
+          "name": "Revision",
+          "hint": "board revision",
+          "column": "revision",
+          "options": []
+        },
+        {
+          "name": "Bus",
+          "hint": "e.g. ISA 16-bit, PCI",
+          "column": null,
+          "options": [
+            "ISA 8-bit",
+            "ISA 16-bit",
+            "PCI",
+            "PCIe",
+            "USB",
+            "Parallel port"
+          ]
+        },
+        {
+          "name": "Features",
+          "hint": "e.g. Wavetable header, MIDI",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "RAM",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. SDRAM, EDO, SIMM 72-pin",
+          "column": null,
+          "options": [
+            "FPM",
+            "EDO",
+            "SDRAM",
+            "DDR",
+            "DDR2",
+            "DDR3",
+            "DDR4",
+            "DDR5",
+            "RDRAM",
+            "SRAM",
+            "VRAM",
+            "SGRAM"
+          ]
+        },
+        {
+          "name": "Capacity",
+          "hint": "e.g. 64MB",
+          "column": null,
+          "options": [
+            "256KB",
+            "512KB",
+            "1MB",
+            "2MB",
+            "4MB",
+            "8MB",
+            "16MB",
+            "32MB",
+            "64MB",
+            "128MB",
+            "256MB",
+            "512MB",
+            "1GB",
+            "2GB",
+            "4GB",
+            "8GB",
+            "16GB",
+            "32GB"
+          ]
+        },
+        {
+          "name": "Speed",
+          "hint": "e.g. PC133, 60ns",
+          "column": null,
+          "options": [
+            "80ns",
+            "70ns",
+            "60ns",
+            "50ns",
+            "PC66",
+            "PC100",
+            "PC133",
+            "PC1600",
+            "PC2100",
+            "PC2700",
+            "PC3200",
+            "PC2-4200",
+            "PC2-5300",
+            "PC2-6400",
+            "PC3-8500",
+            "PC3-10600",
+            "PC3-12800",
+            "PC4-2133",
+            "PC4-2400",
+            "PC4-2666",
+            "PC4-3200"
+          ]
+        },
+        {
+          "name": "Pins",
+          "hint": "",
+          "column": null,
+          "options": [
+            "30",
+            "72",
+            "100",
+            "144",
+            "168",
+            "184",
+            "200",
+            "204",
+            "240",
+            "260",
+            "288"
+          ]
+        },
+        {
+          "name": "Voltage",
+          "hint": "e.g. 3.3V",
+          "column": null,
+          "options": [
+            "5V",
+            "3.3V",
+            "2.5V",
+            "1.8V",
+            "1.5V",
+            "1.35V",
+            "1.2V"
+          ]
+        },
+        {
+          "name": "ECC",
+          "hint": "yes / no",
+          "column": null,
+          "options": [
+            "Yes",
+            "No",
+            "Parity"
+          ]
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "Storage",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. HDD, SSD, CD-ROM",
+          "column": null,
+          "options": [
+            "HDD",
+            "SSD",
+            "CD-ROM",
+            "CD-RW",
+            "DVD-ROM",
+            "DVD-RW",
+            "Floppy drive",
+            "Zip drive",
+            "Tape drive",
+            "CompactFlash",
+            "SD card",
+            "Disk on Module"
+          ]
+        },
+        {
+          "name": "Interface",
+          "hint": "e.g. IDE, SCSI, SATA",
+          "column": null,
+          "options": [
+            "IDE (PATA)",
+            "SCSI",
+            "SCSI-2",
+            "Ultra SCSI",
+            "Ultra2 SCSI",
+            "Ultra160 SCSI",
+            "Ultra320 SCSI",
+            "SAS",
+            "SATA I",
+            "SATA II",
+            "SATA III",
+            "ESDI",
+            "MFM",
+            "RLL",
+            "ST-506",
+            "NVMe",
+            "M.2 SATA",
+            "USB",
+            "FireWire",
+            "Floppy",
+            "Parallel port"
+          ]
+        },
+        {
+          "name": "Capacity",
+          "hint": "e.g. 4.3GB",
+          "column": null,
+          "options": [
+            "20MB",
+            "40MB",
+            "80MB",
+            "120MB",
+            "250MB",
+            "500MB",
+            "1GB",
+            "2.1GB",
+            "4.3GB",
+            "6.4GB",
+            "10GB",
+            "20GB",
+            "40GB",
+            "80GB",
+            "120GB",
+            "160GB",
+            "250GB",
+            "320GB",
+            "500GB",
+            "1TB",
+            "2TB",
+            "4TB",
+            "720KB",
+            "1.44MB",
+            "100MB (Zip)",
+            "250MB (Zip)",
+            "650MB",
+            "700MB",
+            "4.7GB"
+          ]
+        },
+        {
+          "name": "RPM",
+          "hint": "",
+          "column": null,
+          "options": [
+            "3600",
+            "4200",
+            "5400",
+            "7200",
+            "10000",
+            "15000"
+          ]
+        },
+        {
+          "name": "Cache",
+          "hint": "",
+          "column": null,
+          "options": [
+            "64KB",
+            "128KB",
+            "256KB",
+            "512KB",
+            "1MB",
+            "2MB",
+            "8MB",
+            "16MB",
+            "32MB",
+            "64MB",
+            "128MB"
+          ]
+        }
+      ],
+      "settings": {}
+    },
+    {
+      "name": "Other",
+      "fields": [],
+      "settings": {}
+    }
+  ]
+}

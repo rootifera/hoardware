@@ -4,6 +4,7 @@ import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { AuthGate } from "@/components/auth-gate";
 import { AppShell } from "@/components/app-shell";
+import { SetupGate } from "@/components/setup-gate";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full">
         <Providers>
           <AuthGate>
-            <AppShell>{children}</AppShell>
+            <SetupGate>
+              <AppShell>{children}</AppShell>
+            </SetupGate>
           </AuthGate>
         </Providers>
       </body>

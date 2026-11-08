@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { formatBytes, guessKind } from "@/components/file-manager";
+import { coreLabel, coreShown, refKindOf, valueLabel, visibleValues, type CoreKey } from "@/lib/category-config";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { OptionInput } from "@/components/option-input";
 import { SimpleSelect } from "@/components/simple-select";
@@ -24,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api } from "@/lib/api";
+import { afterQuietKey } from "@/lib/scan";
+import { cn } from "@/lib/utils";
 import {
   CONDITIONS,
   EMPTY_FILTERS,
@@ -76,13 +79,6 @@ function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
-/** The kind of reference record that describes a category, if any. */
-function refKindOf(categoryName: string): "cpu" | "gpu" | null {
-  if (/cpu|processor/i.test(categoryName)) return "cpu";
-  if (/gpu|vga|graphics|video/i.test(categoryName)) return "gpu";
-  return null;
-}
-
 export function QuickAddProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setOpen] = useState(false);
   const [preset, setPreset] = useState<QuickAddPreset | undefined>();
@@ -98,7 +94,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
       if (e.key !== "n" || e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
       if (document.querySelector("[role=dialog], [role=alertdialog]")) return;
       e.preventDefault();
-      open();
+      afterQuietKey(() => open());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -162,10 +158,17 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   const [location, setLocation] = useState<PickedLocation | null>(preset?.location ?? remembered.location ?? null);
   const [notes, setNotes] = useState("");
   const [showNotes, setShowNotes] = useState(false);
+  // The original barcode from the packaging, if the item has one. Without it labels use the item's own code.
+  const [barcode, setBarcode] = useState("");
+  const [showBarcode, setShowBarcode] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   // Manuals, drivers, tools…: each keeps the kind guessed from its name until changed.
   const [attachments, setAttachments] = useState<{ file: File; kind: FileKind }[]>([]);
   const [copies, setCopies] = useState(1);
+  // "Several separate items" is a rarely used shortcut: it stays folded away until asked for.
+  const [several, setSeveral] = useState(false);
+  // How many you have, for categories that keep a quantity instead of one record per piece.
+  const [quantity, setQuantity] = useState("1");
   const [position, setPosition] = useState("");
   // A reference record picked from the database lookup (CPU and graphics categories).
   const [match, setMatch] = useState<ReferenceSummary | null>(null);
@@ -195,7 +198,14 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // Fall back to the first category when nothing (valid) is remembered: the id saved from an
   // earlier session may no longer exist. Everything below must use this one, not the raw state.
   const effectiveCategory = categoryOptions.some((o) => o.value === category) ? category : (categoryOptions[0]?.value ?? "");
-  const categoryName = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.name ?? "";
+  const currentCategory = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory);
+  const categoryName = currentCategory?.name ?? "";
+  // The category decides which standard fields this form shows and what they are called.
+  const shown = (k: CoreKey) => coreShown(currentCategory, k);
+  // "Track as stock": counted items (take out / add). Starts as the category's default; ticking it overrides.
+  const [stockOverride, setStockOverride] = useState<boolean | null>(null);
+  const isStock = stockOverride ?? coreShown(currentCategory, "stock");
+  const label = (k: CoreKey, fallback: string) => coreLabel(currentCategory, k, fallback);
   const specFields = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.fields ?? [];
   const specKey = (f: { name: string; column: string | null }) => (f.column ? `col:${f.column}` : f.name.toLowerCase());
 
@@ -265,7 +275,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     if (saving) return;
     if (!effectiveCategory) return setError("Choose a category.");
     if (!model.trim()) {
-      setError("Describe the part, e.g. “Unknown PCI video card”.");
+      setError(`Fill in the ${label("model", "model / description").toLowerCase()}.`);
       modelRef.current?.focus();
       return;
     }
@@ -291,7 +301,13 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         condition,
         test_status: testStatus,
         notes: notes.trim() || null,
+        ...(barcode.trim() ? { barcode: barcode.trim() } : {}),
+        ...(isStock ? { is_stock: true, quantity: Number(quantity.trim() === "" ? "1" : quantity) } : {}),
       };
+      if (isStock && (!Number.isInteger(fields.quantity) || (fields.quantity ?? 0) < 0)) {
+        setSaving(false);
+        return setError(`${label("stock", "Quantity")} must be a whole number, 0 or more.`);
+      }
       // A position is the item's exact spot inside the location.
       const start = position.trim() === "" ? null : Number(position);
       if (start !== null && (!Number.isInteger(start) || start < 0)) {
@@ -302,7 +318,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         setSaving(false);
         return setError("Choose a location to give the item a position.");
       }
-      // Several copies are several separate items (own code, condition, test status),
+      // Several items are separate records (own code, condition, test status),
       // at consecutive positions when a start position is given.
       const matched = match ? { reference_model_id: match.id, identification_confidence: "confirmed" as const } : {};
       const batch =
@@ -368,6 +384,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         setSpecs({});
         setNotes("");
         setShowNotes(false);
+        setBarcode("");
+        setShowBarcode(false);
         setFiles([]);
         setAttachments([]);
         setMatch(null);
@@ -375,10 +393,13 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         // Carry on from the next free spot.
         if (start !== null) setPosition(String(start + copies));
         setCopies(1);
+        setSeveral(false);
+        setQuantity("1");
+        setStockOverride(null);
         (lookupAvailable ? lookupRef : modelRef).current?.focus();
       } else {
         onClose();
-        // Several copies have no single page to open.
+        // Several items have no single page to open.
         if (mode === "edit" && item) router.push(`/items/${item.id}`);
       }
     } catch (e) {
@@ -457,7 +478,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         void save("close");
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-[11rem_minmax(0,1fr)]">
+      <div className={cn("grid gap-4", shown("part_number") && "sm:grid-cols-[11rem_minmax(0,1fr)]")}>
         <div className="grid gap-1.5">
           <Label htmlFor="qa-category">Category</Label>
           <SimpleSelect
@@ -473,10 +494,12 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             placeholder="Category"
           />
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="qa-pn">Part number</Label>
-          <Input id="qa-pn" autoComplete="off" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} />
-        </div>
+        {shown("part_number") && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="qa-pn">{label("part_number", "Part number")}</Label>
+            <Input id="qa-pn" autoComplete="off" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {lookupAvailable && (
@@ -535,16 +558,18 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <div className="flex h-[1.125rem] items-center">
-            <Label htmlFor="qa-manufacturer">Manufacturer</Label>
+      <div className={cn("grid gap-4", shown("manufacturer") && "sm:grid-cols-2")}>
+        {shown("manufacturer") && (
+          <div className="grid gap-1.5">
+            <div className="flex h-[1.125rem] items-center">
+              <Label htmlFor="qa-manufacturer">{label("manufacturer", "Manufacturer")}</Label>
+            </div>
+            <Input id="qa-manufacturer" autoComplete="off" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
           </div>
-          <Input id="qa-manufacturer" autoComplete="off" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
-        </div>
+        )}
         <div className="grid gap-1.5">
           <div className="flex h-[1.125rem] items-center justify-between gap-2">
-            <Label htmlFor="qa-model">Model / description</Label>
+            <Label htmlFor="qa-model">{label("model", "Model / description")}</Label>
             {model.trim().length >= 3 && (existing.data ?? 0) > 0 && (
               <span className="truncate text-xs text-muted-foreground">
                 You already have {existing.data!.toLocaleString()} ·{" "}
@@ -559,7 +584,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             ref={modelRef}
             autoFocus={!lookupAvailable}
             autoComplete="off"
-            placeholder="e.g. Unknown ISA VGA card"
+            placeholder={refKind ? "e.g. Unknown ISA VGA card" : "What is it?"}
             value={model}
             onChange={(e) => setModel(e.target.value)}
           />
@@ -599,28 +624,40 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         </fieldset>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label htmlFor="qa-condition">Condition</Label>
-          <SimpleSelect
-            id="qa-condition"
-            className="w-full"
-            value={condition}
-            onChange={(v) => setCondition(v as Condition)}
-            options={CONDITIONS.map((c) => ({ value: c, label: c }))}
-          />
+      {isStock && (
+        <div className="grid gap-1.5 sm:w-40">
+          <Label htmlFor="qa-quantity">{label("stock", "Quantity")}</Label>
+          <Input id="qa-quantity" type="number" min={0} inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="qa-test">Test status</Label>
-          <SimpleSelect
-            id="qa-test"
-            className="w-full"
-            value={testStatus}
-            onChange={(v) => setTestStatus(v as TestStatus)}
-            options={TEST_STATUSES.map((s) => ({ value: s, label: s }))}
-          />
+      )}
+      {(shown("condition") || shown("test_status")) && (
+        <div className={cn("grid gap-4", shown("condition") && shown("test_status") && "sm:grid-cols-2")}>
+          {shown("condition") && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="qa-condition">{label("condition", "Condition")}</Label>
+              <SimpleSelect
+                id="qa-condition"
+                className="w-full"
+                value={condition}
+                onChange={(v) => setCondition(v as Condition)}
+                options={visibleValues(currentCategory, "condition", CONDITIONS, condition).map((c) => ({ value: c, label: valueLabel(currentCategory, "condition", c) }))}
+              />
+            </div>
+          )}
+          {shown("test_status") && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="qa-test">{label("test_status", "Test status")}</Label>
+              <SimpleSelect
+                id="qa-test"
+                className="w-full"
+                value={testStatus}
+                onChange={(v) => setTestStatus(v as TestStatus)}
+                options={visibleValues(currentCategory, "test_status", TEST_STATUSES, testStatus).map((s) => ({ value: s, label: valueLabel(currentCategory, "test_status", s) }))}
+              />
+            </div>
+          )}
         </div>
-      </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
         <div className="grid gap-1.5">
           <Label htmlFor="qa-location">Location</Label>
@@ -656,26 +693,57 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
 
       {/* The rarely needed extras share one quiet row. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4">
-        <div className="flex items-center gap-2">
-          <Label htmlFor="qa-copies">Copies</Label>
-          <Input
-            id="qa-copies"
-            type="number"
-            min={1}
-            max={200}
-            className="w-16"
-            value={copies}
-            onChange={(e) => {
-              const n = Math.max(1, Math.min(200, Number(e.target.value) || 1));
-              setCopies(n);
-              // Several copies cannot share one photo or file upload: it is added to each afterwards.
-              if (n > 1) {
-                setFiles([]);
-                setAttachments([]);
+        <label className="flex cursor-pointer items-center gap-2 text-sm" title="Count how many you have; take out and add later">
+          <input type="checkbox" className="size-4 accent-primary" checked={isStock} onChange={(e) => {
+              setStockOverride(e.target.checked);
+              if (e.target.checked) {
+                setSeveral(false);
+                setCopies(1);
               }
             }}
           />
-        </div>
+          Track as stock
+        </label>
+        {/* A stock item is one record that says "100 of them", so several separate items is not offered. */}
+        {!isStock &&
+          (several ? (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="qa-copies">Number of items</Label>
+              <Input
+                id="qa-copies"
+                type="number"
+                min={1}
+                max={200}
+                className="w-16"
+                value={copies}
+                onChange={(e) => {
+                  const n = Math.max(1, Math.min(200, Number(e.target.value) || 1));
+                  setCopies(n);
+                  // Several items cannot share one photo or file upload: it is added to each afterwards.
+                  if (n > 1) {
+                    setFiles([]);
+                    setAttachments([]);
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Add just one item"
+                onClick={() => {
+                  setSeveral(false);
+                  setCopies(1);
+                }}
+              >
+                <X />
+              </Button>
+            </div>
+          ) : (
+            <Button type="button" variant="ghost" size="sm" title="Create several identical items at once, each with its own code and position" onClick={() => setSeveral(true)}>
+              <Plus /> Add several separate items…
+            </Button>
+          ))}
         <Button type="button" variant="ghost" size="sm" disabled={copies > 1} render={<label htmlFor="qa-photos" className="cursor-pointer" />}>
           <ImagePlus /> {files.length ? `${files.length} photo${files.length === 1 ? "" : "s"}` : "Add photos"}
         </Button>
@@ -701,9 +769,14 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             e.target.value = "";
           }}
         />
-        {!showNotes && !notes && (
+        {shown("barcode") && !showBarcode && !barcode && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowBarcode(true)} title="The original barcode from the packaging. Without one, labels use the item's own code">
+            <Plus /> Add {label("barcode", "Barcode").toLowerCase()}
+          </Button>
+        )}
+        {shown("notes") && !showNotes && !notes && (
           <Button type="button" variant="ghost" size="sm" onClick={() => setShowNotes(true)}>
-            <Plus /> Add notes
+            <Plus /> Add {label("notes", "Notes").toLowerCase()}
           </Button>
         )}
         <span className="min-w-0 text-xs text-muted-foreground">
@@ -737,9 +810,26 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           ))}
         </ul>
       )}
-      {(showNotes || notes) && (
+      {shown("barcode") && (showBarcode || barcode) && (
         <div className="grid gap-1.5">
-          <Label htmlFor="qa-notes">Notes</Label>
+          <Label htmlFor="qa-barcode">{label("barcode", "Barcode")}</Label>
+          <Input
+            id="qa-barcode"
+            autoComplete="off"
+            autoFocus={showBarcode && !barcode}
+            placeholder="Scan or type the barcode from the packaging"
+            maxLength={100}
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            // A scanner ends the code with Enter: that must not save the item.
+            onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+          />
+          <p className="text-xs text-muted-foreground">Optional. Without one, labels and scans use the item&apos;s own code.</p>
+        </div>
+      )}
+      {shown("notes") && (showNotes || notes) && (
+        <div className="grid gap-1.5">
+          <Label htmlFor="qa-notes">{label("notes", "Notes")}</Label>
           <Textarea id="qa-notes" rows={2} autoFocus={showNotes && !notes} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
       )}

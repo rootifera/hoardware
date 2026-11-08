@@ -42,6 +42,10 @@ class Category(Base):
     # a "column" (chipset_manufacturer / chipset / revision) is stored in that
     # item column; every other field is a named entry in the item's own specs.
     fields: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # Which of the standard fields (manufacturer, part number, condition, test status...) this
+    # category shows and what they are called: {"core": {"manufacturer": {"show": false,
+    # "label": "Brand"}}, "values": {"condition": {"Excellent": "Near mint"}}}. Empty = the defaults.
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -93,6 +97,15 @@ class Item(Base):
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="RESTRICT"))
     # The item's exact position inside its location. Unique per location when set.
     order: Mapped[int | None] = mapped_column("order", Integer)
+    # Stock items are counted: one record for 100 capacitors, with take out / add. Everything else
+    # is a single physical item and its quantity stays 1.
+    is_stock: Mapped[bool] = mapped_column(server_default=text("false"))
+    quantity: Mapped[int] = mapped_column(Integer, server_default="1")
+    # The original barcode (the one on the packaging), if the item has one. Labels and scans use it;
+    # without one they use the item's own code. Not unique: identical boxed items share a barcode.
+    barcode: Mapped[str | None] = mapped_column(Text)
+    # Warn when a stock item is down to this many (or fewer). Optional.
+    low_stock_level: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     acquired_on: Mapped[date | None] = mapped_column(Date)
     # Stock-take: when the item was last seen in place.
@@ -164,6 +177,28 @@ class ItemFile(Base):
     kind: Mapped[str] = mapped_column(Text, server_default=FileKind.OTHER.value)
     description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StockLog(Base):
+    """One take-out / add of a stock item: how it changed and what is left."""
+
+    __tablename__ = "stock_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"))
+    change: Mapped[int] = mapped_column(BigInteger)
+    quantity_after: Mapped[int] = mapped_column(BigInteger)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppSetting(Base):
+    """Installation-wide settings (first-run choice, title, item code prefix)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[Any] = mapped_column(JSONB)
 
 
 class PendingDeletion(Base):

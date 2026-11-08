@@ -1,0 +1,16 @@
+{
+  "key": "blank",
+  "name": "Start empty",
+  "description": "One empty category to begin with. Add your own categories and fields on the Categories page.",
+  "code_prefix": "IT",
+  "categories": [
+    {
+      "name": "Items",
+      "fields": [],
+      "settings": {
+        "core": {},
+        "values": {}
+      }
+    }
+  ]
+}

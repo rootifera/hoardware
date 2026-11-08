@@ -11,8 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuickAdd } from "@/components/quick-add";
 import { api } from "@/lib/api";
+import { coreLabel, coreShown, valueLabel } from "@/lib/category-config";
 import { cn } from "@/lib/utils";
-import { EMPTY_FILTERS, type ItemFilters, type ItemSummary } from "@/lib/types";
+import { EMPTY_FILTERS, type Category, type ItemFilters, type ItemSummary } from "@/lib/types";
 
 const ROW_HEIGHT = 76;
 const PAGE_SIZE = 50;
@@ -44,7 +45,35 @@ function Thumb({ item }: { item: ItemSummary }) {
   );
 }
 
-function ItemRow({ item, selected, onToggle }: { item: ItemSummary; selected: boolean; onToggle: (shift: boolean) => void }) {
+/** The quantity of a stock item next to its name, with a warning when it is low or gone. */
+function StockTag({ item }: { item: ItemSummary }) {
+  const out = item.quantity === 0;
+  const low = !out && item.low_stock_level !== null && item.quantity <= item.low_stock_level;
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <span className="rounded bg-muted px-1.5 font-mono text-xs" title="In stock">
+        ×{item.quantity.toLocaleString()}
+      </span>
+      {(out || low) && (
+        <span className={cn("rounded px-1.5 text-xs font-medium", out ? "bg-red-500/15 text-red-700 dark:text-red-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300")}>
+          {out ? "Out" : "Low"}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ItemRow({
+  item,
+  category,
+  selected,
+  onToggle,
+}: {
+  item: ItemSummary;
+  category: Category | undefined;
+  selected: boolean;
+  onToggle: (shift: boolean) => void;
+}) {
   const name = [item.manufacturer, item.model].filter(Boolean).join(" ");
   return (
     <div className={cn("flex h-full items-center rounded-lg transition-colors", selected ? "bg-primary/5" : "hover:bg-muted/60")}>
@@ -68,10 +97,17 @@ function ItemRow({ item, selected, onToggle }: { item: ItemSummary; selected: bo
           <span className="font-mono text-xs text-muted-foreground">{item.inventory_code}</span>
           <span className="hidden text-xs text-muted-foreground sm:inline">{item.category_name}</span>
         </div>
-        <div className="truncate font-medium">{name}</div>
+        <div className="flex items-baseline gap-2">
+          <span className="truncate font-medium">{name}</span>
+          {item.is_stock && <StockTag item={item} />}
+        </div>
         <div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
           {item.spec_line && <span className="truncate font-medium text-foreground/80">{item.spec_line}</span>}
-          {item.part_number && <span className="truncate">P/N {item.part_number}</span>}
+          {item.part_number && coreShown(category, "part_number") && (
+            <span className="truncate">
+              {coreLabel(category, "part_number", "P/N")} {item.part_number}
+            </span>
+          )}
           {item.chipset && <span className="truncate">{item.chipset}</span>}
           <span className="flex min-w-0 items-center gap-1 truncate sm:hidden">
             <MapPin className="size-3 shrink-0" />
@@ -89,9 +125,13 @@ function ItemRow({ item, selected, onToggle }: { item: ItemSummary; selected: bo
       </div>
       {/* Fixed width so the location column lines up from row to row. */}
       <div className="flex shrink-0 flex-col items-end gap-1 sm:w-40 sm:flex-row sm:items-center sm:justify-end lg:w-72">
-        <ConfidenceBadge confidence={item.identification_confidence} />
-        <ConditionBadge condition={item.condition} className="hidden lg:inline-flex" />
-        <TestStatusBadge status={item.test_status} />
+        {coreShown(category, "confidence") && <ConfidenceBadge confidence={item.identification_confidence} />}
+        {coreShown(category, "condition") && (
+          <ConditionBadge condition={item.condition} label={valueLabel(category, "condition", item.condition)} className="hidden lg:inline-flex" />
+        )}
+        {coreShown(category, "test_status") && (
+          <TestStatusBadge status={item.test_status} label={valueLabel(category, "test_status", item.test_status)} />
+        )}
       </div>
     </Link>
     </div>
@@ -106,6 +146,8 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor,
   });
+  const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories, staleTime: 60_000 });
+  const categoryById = new Map((categories.data ?? []).map((c) => [c.id, c]));
   const count = useQuery({
     queryKey: ["items", "count", { ...filters, sort: "newest", order: "" }],
     queryFn: () => api.itemCount(filters),
@@ -205,11 +247,11 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
       <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
         {filtered ? <SearchX className="size-10 text-muted-foreground" /> : <PackageOpen className="size-10 text-muted-foreground" />}
         <div>
-          <p className="font-medium">{filtered ? "Nothing matches these filters" : "No hardware yet"}</p>
+          <p className="font-medium">{filtered ? "Nothing matches these filters" : "No items yet"}</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {filtered
               ? "Try a shorter search or clear a filter."
-              : "Add your first part. Only a category and a description are required."}
+              : "Add your first item. Only a category and a description are required."}
           </p>
         </div>
         {filtered ? (
@@ -219,7 +261,7 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
             </Button>
           )
         ) : (
-          <Button onClick={() => openQuickAdd()}>Add the first part</Button>
+          <Button onClick={() => openQuickAdd()}>Add the first item</Button>
         )}
       </div>
     );
@@ -267,7 +309,7 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
               className="absolute inset-x-0 top-0 border-b border-border/60"
               style={{ height: row.size, transform: `translateY(${row.start - virtualizer.options.scrollMargin}px)` }}
             >
-              <ItemRow item={item} selected={isSelected(item.id)} onToggle={(shift) => toggle(row.index, shift)} />
+              <ItemRow item={item} category={categoryById.get(item.category_id)} selected={isSelected(item.id)} onToggle={(shift) => toggle(row.index, shift)} />
             </div>
           );
         })}

@@ -64,7 +64,7 @@ test.describe("accessibility", () => {
 
   test("quick add dialog", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText(/^\d[\d,]* items?$|^No hardware yet$/)).toBeVisible();
+    await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
     await page.keyboard.press("n");
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.waitForTimeout(400); // let the open animation finish
@@ -98,6 +98,9 @@ test.describe("accessibility", () => {
     await page.goto(`/locations/print?id=${locationId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await audit(page, "print list");
+    await page.goto(`/labels?ids=${itemId}`);
+    await expect(page.getByTestId("label")).toHaveCount(1);
+    await audit(page, "labels");
   });
 
   test("dark theme", async ({ page }) => {

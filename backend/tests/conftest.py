@@ -84,13 +84,18 @@ DEFAULT_FIELDS = {name: _seed_fields12.with_options(name, fields) for name, fiel
 @pytest.fixture(autouse=True)
 def clean_state():
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE items, photos, locations, categories, pending_deletions, reference_models, reference_imports, reference_sources RESTART IDENTITY CASCADE"))
+        conn.execute(text("TRUNCATE items, photos, locations, categories, pending_deletions, reference_models, reference_imports, reference_sources, app_settings RESTART IDENTITY CASCADE"))
+        # A test may have chosen another item code prefix: back to the default.
+        conn.execute(text("ALTER TABLE items ALTER COLUMN inventory_code SET DEFAULT 'HW-' || lpad(nextval('inventory_code_seq')::text, 6, '0')"))
         conn.execute(text("ALTER SEQUENCE inventory_code_seq RESTART"))
         for i, name in enumerate(SEED):
             conn.execute(
                 text("INSERT INTO categories (name, sort_order, fields) VALUES (:n, :o, CAST(:f AS jsonb))"),
                 {"n": name, "o": i * 10, "f": json.dumps(DEFAULT_FIELDS.get(name.lower(), []))},
             )
+    from app.services import appsettings
+
+    appsettings.forget_all()
     shutil.rmtree(_photos_dir, ignore_errors=True)
     _photos_dir.mkdir(parents=True, exist_ok=True)
     yield
