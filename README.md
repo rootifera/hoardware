@@ -243,7 +243,9 @@ docker compose run --rm --no-deps backend pytest
 # frontend
 cd frontend && npm install && npm run lint && npx tsc --noEmit
 
-# browser smoke tests against the running stack (Playwright in a container)
+# browser smoke tests against the running stack (Playwright in a container). They expect the standard PC
+# categories: run them against a fresh install (their setup step picks "standard" on an empty one), not one
+# you have customised.
 cd e2e && npm install
 docker run --rm --network hoardware_default -v "$PWD":/work -w /work \
   -e BASE_URL=http://frontend:3000 mcr.microsoft.com/playwright:v1.64.0-noble npx playwright test

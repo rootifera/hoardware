@@ -375,6 +375,7 @@ function ItemEditor({ item }: { item: Item }) {
                       manufacturer: item.manufacturer ?? "",
                       partNumber: item.part_number ?? "",
                       chipset: item.chipset ?? "",
+                      isStock: item.is_stock,
                       specs: {
                         ...Object.fromEntries(Object.entries(item.attributes).map(([k, v]) => [k, asText(v)])),
                         ...(item.chipset_manufacturer ? { "col:chipset_manufacturer": item.chipset_manufacturer } : {}),

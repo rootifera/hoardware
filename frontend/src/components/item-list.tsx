@@ -55,7 +55,7 @@ function StockTag({ item }: { item: ItemSummary }) {
         ×{item.quantity.toLocaleString()}
       </span>
       {(out || low) && (
-        <span className={cn("rounded px-1.5 text-xs font-medium", out ? "bg-red-500/15 text-red-700 dark:text-red-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300")}>
+        <span className={cn("rounded px-1.5 text-xs font-medium", out ? "bg-red-500/15 text-red-800 dark:text-red-300" : "bg-amber-500/15 text-amber-900 dark:text-amber-300")}>
           {out ? "Out" : "Low"}
         </span>
       )}

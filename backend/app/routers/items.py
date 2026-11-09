@@ -373,6 +373,8 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
     for item in created:
         if item.test_status != TestStatus.UNTESTED.value:
             log_test(session, item, item.test_status, item.test_notes)
+        if item.is_stock and item.quantity:
+            stock_service.record(session, item.id, item.quantity, item.quantity, "Starting stock")
     _commit_or_position_conflict(session)
     return ItemBatchOut(
         created=[

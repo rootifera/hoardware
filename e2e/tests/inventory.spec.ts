@@ -1608,3 +1608,21 @@ test("The original barcode: entered when adding, used by labels and scans, with 
   await expect(page.locator(`a[href="/items/${id}"]`)).toBeVisible();
   await expect(page.locator(`a[href="/items/${twin.id}"]`)).toBeVisible();
 });
+
+test("Add another like this keeps a stock item a stock item, and the stock history can be expanded", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Like stock ${RUN}`, is_stock: true, quantity: 100 } })).json();
+  created.push(item.id);
+  for (let i = 0; i < 12; i++) await request.post(`/api/v1/items/${item.id}/stock`, { data: { change: -1, note: `use ${i}` } });
+  await page.goto(`/items/${item.id}`);
+  const history = page.getByRole("list", { name: "Stock history" });
+  await expect(history.getByRole("listitem")).toHaveCount(10); // the latest ten
+  await page.getByRole("button", { name: /Show all 13/ }).click();
+  await expect(history.getByRole("listitem")).toHaveCount(13);
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Add another like this" }).click();
+  const qa = page.getByRole("dialog");
+  await expect(qa.getByLabel("Track as stock")).toBeChecked();
+  await expect(qa.getByLabel("Model / description")).toHaveValue(`Like stock ${RUN}`);
+  await expect(qa.getByLabel("Barcode")).toHaveCount(0); // a barcode belongs to one packaging: not copied
+});

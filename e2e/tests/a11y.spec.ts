@@ -49,6 +49,24 @@ test.describe("accessibility", () => {
     itemId = created.created[0].id;
   });
 
+  test("stock items: the list tags and the stock panel, including Low and Out", async ({ page, request }) => {
+    const cats = await (await request.get("/api/v1/categories")).json();
+    const model = `A11y stock ${RUN}`;
+    const low = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} low`, is_stock: true, quantity: 5, low_stock_level: 10, barcode: "5012345678900" } })).json();
+    const out = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} out`, is_stock: true, quantity: 0 } })).json();
+    itemIds.push(low.id, out.id);
+    await page.goto(`/?q=${encodeURIComponent(model)}`);
+    await expect(page.getByText("Low", { exact: true })).toBeVisible();
+    await expect(page.getByText("Out", { exact: true })).toBeVisible();
+    await audit(page, "inventory list with Low and Out tags");
+    await page.goto(`/items/${low.id}`);
+    await expect(page.getByRole("region", { name: "Stock" })).toContainText("Running low");
+    await audit(page, "stock panel, running low");
+    await page.goto(`/items/${out.id}`);
+    await expect(page.getByRole("region", { name: "Stock" })).toContainText("None left");
+    await audit(page, "stock panel, none left");
+  });
+
   test("inventory list, with the bulk bar", async ({ page }) => {
     await page.goto(`/?q=${encodeURIComponent(`a11y cpu ${RUN}`)}`);
     await expect(page.getByRole("checkbox", { name: /^Select HW-/ })).toHaveCount(3);

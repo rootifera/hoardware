@@ -100,3 +100,15 @@ def test_selecting_everything_that_matches_low_stock_never_touches_other_items(c
     assert r.status_code == 200 and r.json()["deleted"] == 1
     assert client.get(f"{API}/items/{low['id']}").status_code == 404
     assert client.get(f"{API}/items/{fine['id']}").status_code == 200 and client.get(f"{API}/items/{single['id']}").status_code == 200
+
+
+def test_imported_and_batch_created_stock_items_get_their_starting_history(client, cats):
+    body = "category,model,qty\nOther,Washers,1000\nOther,Single,\n"
+    assert client.post(f"{API}/import/items.csv", params={"commit": "true"}, files={"file": ("x.csv", body, "text/csv")}).json()["imported"] == 2
+    by_model = {i["model"]: i["id"] for i in client.get(f"{API}/items").json()["items"]}
+    assert [(e["change"], e["quantity_after"], e["note"]) for e in history(client, by_model["Washers"])] == [(1000, 1000, "Starting stock")]
+    assert history(client, by_model["Single"]) == []  # not a stock item: no history
+    r = client.post(f"{API}/items/batch", json={"item": {"category_id": cats["Other"], "model": "Bin", "is_stock": True, "quantity": 7}, "copies": 2})
+    assert r.status_code == 201
+    for i in client.get(f"{API}/items", params={"q": "bin"}).json()["items"]:
+        assert [(e["change"], e["quantity_after"]) for e in history(client, i["id"])] == [(7, 7)]

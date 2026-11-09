@@ -50,6 +50,8 @@ export interface QuickAddPreset {
   /** The item's own specs, by field name. */
   specs?: Record<string, string>;
   chipset?: string;
+  /** "Add another like this" of a stock item starts as a stock item too. */
+  isStock?: boolean;
 }
 
 interface QuickAddContext {
@@ -203,7 +205,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // The category decides which standard fields this form shows and what they are called.
   const shown = (k: CoreKey) => coreShown(currentCategory, k);
   // "Track as stock": counted items (take out / add). Starts as the category's default; ticking it overrides.
-  const [stockOverride, setStockOverride] = useState<boolean | null>(null);
+  const [stockOverride, setStockOverride] = useState<boolean | null>(preset?.isStock ? true : null);
   const isStock = stockOverride ?? coreShown(currentCategory, "stock");
   const label = (k: CoreKey, fallback: string) => coreLabel(currentCategory, k, fallback);
   const specFields = (categories.data ?? []).find((c) => String(c.id) === effectiveCategory)?.fields ?? [];

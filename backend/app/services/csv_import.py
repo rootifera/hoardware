@@ -21,7 +21,7 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
 from app.enums import Condition, IdentificationConfidence, TestStatus
-from app.models import Category, Item, Location
+from app.models import Category, Item, Location, StockLog
 from app.schemas import ImportReport, ImportRowError
 from app.services import locations as location_service
 
@@ -397,14 +397,26 @@ def run_import(
     for row in good:
         batch.append({**row.fields, "category_id": categories[row.category_name.lower()], "location_id": row.location_id})
         if len(batch) >= BATCH:
-            session.execute(insert(Item), batch)
+            _insert_items(session, batch)
             batch.clear()
     if batch:
-        session.execute(insert(Item), batch)
+        _insert_items(session, batch)
     session.commit()
     report.committed = True
     report.imported = len(good)
     return report
+
+
+def _insert_items(session: Session, batch: list[dict]) -> None:
+    """Insert a batch of items; stock items also get their "Starting stock" history entry."""
+    rows = session.execute(insert(Item).returning(Item.id, Item.is_stock, Item.quantity), batch).all()
+    entries = [
+        {"item_id": item_id, "change": quantity, "quantity_after": quantity, "note": "Starting stock"}
+        for item_id, is_stock, quantity in rows
+        if is_stock and quantity
+    ]
+    if entries:
+        session.execute(insert(StockLog), entries)
 
 
 def template_csv() -> str:

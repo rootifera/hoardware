@@ -17,6 +17,7 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState("1");
   const [note, setNote] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const history = useQuery({ queryKey: ["stock-log", item.id], queryFn: () => api.stockLog(item.id) });
 
   const change = useMutation({
@@ -44,7 +45,7 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
           <p className="text-sm text-muted-foreground">Take some out when you use them, add some when you get more.</p>
         </div>
         <div className="text-right">
-          <div className={cn("text-3xl font-semibold tabular-nums", out && "text-destructive", low && "text-amber-700 dark:text-amber-300")}>
+          <div className={cn("text-3xl font-semibold tabular-nums", out && "text-destructive", low && "text-amber-800 dark:text-amber-300")}>
             {item.quantity.toLocaleString()}
           </div>
           <div className="text-xs text-muted-foreground">
@@ -90,7 +91,7 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
         <div className="mt-5">
           <h3 className="mb-1.5 text-sm font-medium">History</h3>
           <ul className="divide-y rounded-lg border text-sm" aria-label="Stock history">
-            {history.data.slice(0, 10).map((e) => (
+            {history.data.slice(0, showAll ? undefined : 10).map((e) => (
               <li key={e.id} className="grid grid-cols-[5rem_minmax(0,1fr)_auto] items-baseline gap-3 px-3 py-1.5">
                 <span className={cn("font-mono tabular-nums", e.change < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300")}>
                   {e.change > 0 ? "+" : ""}
@@ -103,6 +104,11 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
               </li>
             ))}
           </ul>
+          {history.data.length > 10 && (
+            <button type="button" className="mt-1.5 text-xs text-muted-foreground underline" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? "Show the latest 10" : `Show all ${history.data.length}`}
+            </button>
+          )}
         </div>
       )}
     </section>
