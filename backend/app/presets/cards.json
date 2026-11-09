@@ -1,0 +1,398 @@
+{
+  "key": "cards",
+  "name": "Trading cards & collectibles",
+  "description": "Sports cards, trading card games, sealed products and memorabilia. No test status; condition uses card grades.",
+  "code_prefix": "TC",
+  "categories": [
+    {
+      "name": "Sports cards",
+      "fields": [
+        {
+          "name": "Sport",
+          "hint": "e.g. Baseball",
+          "column": null,
+          "options": [
+            "Baseball",
+            "Basketball",
+            "Football",
+            "Hockey",
+            "Soccer",
+            "Boxing",
+            "Wrestling",
+            "Other"
+          ]
+        },
+        {
+          "name": "Player",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Team",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "e.g. 1986",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Set",
+          "hint": "e.g. Fleer",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Rookie card",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "name": "Variant",
+          "hint": "e.g. refractor, auto, relic",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Grading company",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Raw (ungraded)",
+            "PSA",
+            "BGS",
+            "SGC",
+            "CGC",
+            "Other"
+          ]
+        },
+        {
+          "name": "Grade",
+          "hint": "e.g. 9.5",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "manufacturer": {
+            "label": "Brand"
+          },
+          "model": {
+            "label": "Card name"
+          },
+          "part_number": {
+            "label": "Card number"
+          },
+          "condition": {
+            "label": "Condition / grade"
+          }
+        },
+        "values": {
+          "condition": {
+            "Unknown": "Ungraded",
+            "New / Sealed": "Gem mint",
+            "Excellent": "Near mint",
+            "Good": "Lightly played",
+            "Fair": "Moderately played",
+            "Poor": "Heavily played",
+            "Damaged": "Damaged"
+          }
+        }
+      }
+    },
+    {
+      "name": "Trading card games",
+      "fields": [
+        {
+          "name": "Game",
+          "hint": "e.g. Pokémon",
+          "column": null,
+          "options": [
+            "Magic: The Gathering",
+            "Pokémon",
+            "Yu-Gi-Oh!",
+            "Lorcana",
+            "Digimon",
+            "Other"
+          ]
+        },
+        {
+          "name": "Set",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Rarity",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Common",
+            "Uncommon",
+            "Rare",
+            "Super rare",
+            "Ultra rare",
+            "Secret rare",
+            "Holo",
+            "Promo"
+          ]
+        },
+        {
+          "name": "Language",
+          "hint": "",
+          "column": null,
+          "options": [
+            "English",
+            "Japanese",
+            "German",
+            "French",
+            "Italian",
+            "Spanish",
+            "Korean",
+            "Chinese",
+            "Other"
+          ]
+        },
+        {
+          "name": "Foil",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "name": "Edition",
+          "hint": "e.g. 1st edition",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Grading company",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Raw (ungraded)",
+            "PSA",
+            "BGS",
+            "SGC",
+            "CGC",
+            "Other"
+          ]
+        },
+        {
+          "name": "Grade",
+          "hint": "e.g. 10",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "manufacturer": {
+            "label": "Publisher"
+          },
+          "model": {
+            "label": "Card name"
+          },
+          "part_number": {
+            "label": "Card number"
+          },
+          "condition": {
+            "label": "Condition / grade"
+          },
+          "stock": {
+            "show": true
+          }
+        },
+        "values": {
+          "condition": {
+            "Unknown": "Ungraded",
+            "New / Sealed": "Gem mint",
+            "Excellent": "Near mint",
+            "Good": "Lightly played",
+            "Fair": "Moderately played",
+            "Poor": "Heavily played",
+            "Damaged": "Damaged"
+          }
+        }
+      }
+    },
+    {
+      "name": "Sealed products",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Booster box",
+          "column": null,
+          "options": [
+            "Booster pack",
+            "Booster box",
+            "Starter deck",
+            "Collector box",
+            "Case",
+            "Tin",
+            "Bundle",
+            "Other"
+          ]
+        },
+        {
+          "name": "Game or sport",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Set",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Edition",
+          "hint": "e.g. 1st edition",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "model": {
+            "label": "Product"
+          },
+          "part_number": {
+            "label": "SKU"
+          },
+          "stock": {
+            "show": true
+          }
+        },
+        "values": {
+          "condition": {
+            "Unknown": "Not checked",
+            "New / Sealed": "Factory sealed",
+            "Excellent": "Sealed, minor wear",
+            "Good": "Resealed or worn",
+            "Fair": "Damaged packaging",
+            "Poor": "Opened",
+            "Damaged": "Damaged"
+          }
+        }
+      }
+    },
+    {
+      "name": "Memorabilia",
+      "fields": [
+        {
+          "name": "Type",
+          "hint": "e.g. Signed photo",
+          "column": null,
+          "options": [
+            "Autograph",
+            "Jersey",
+            "Ticket",
+            "Poster",
+            "Programme",
+            "Figure",
+            "Equipment",
+            "Other"
+          ]
+        },
+        {
+          "name": "Person or team",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Year",
+          "hint": "",
+          "column": null,
+          "options": []
+        },
+        {
+          "name": "Authenticated",
+          "hint": "",
+          "column": null,
+          "options": [
+            "Yes",
+            "No",
+            "Unknown"
+          ]
+        },
+        {
+          "name": "Certificate",
+          "hint": "e.g. COA number",
+          "column": null,
+          "options": []
+        }
+      ],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          },
+          "model": {
+            "label": "Item"
+          },
+          "part_number": {
+            "show": false
+          }
+        },
+        "values": {}
+      }
+    },
+    {
+      "name": "Other",
+      "fields": [],
+      "settings": {
+        "core": {
+          "test_status": {
+            "show": false
+          },
+          "confidence": {
+            "show": false
+          }
+        },
+        "values": {}
+      }
+    }
+  ]
+}

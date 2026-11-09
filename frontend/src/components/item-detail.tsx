@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Copy, ExternalLink, Loader2, MoreHorizontal, Plus, Save, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Copy, ExternalLink, Loader2, MoreHorizontal, Plus, Printer, Save, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -9,11 +9,13 @@ import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { FileManager } from "@/components/file-manager";
 import { OptionInput } from "@/components/option-input";
+import { StockPanel } from "@/components/stock-panel";
 import { PhotoManager } from "@/components/photo-manager";
 import { useQuickAdd } from "@/components/quick-add";
 import { ReferencePanel } from "@/components/reference-panel";
 import { SimpleSelect } from "@/components/simple-select";
 import { ConditionBadge, ConfidenceBadge, TestStatusBadge } from "@/components/status";
+import { coreLabel, coreShown, refKindOf, valueLabel, visibleValues, type CoreKey } from "@/lib/category-config";
 import { TestHistory } from "@/components/test-history";
 import {
   AlertDialog,
@@ -55,6 +57,7 @@ interface Draft {
   manufacturer: string;
   model: string;
   part_number: string;
+  barcode: string;
   revision: string;
   chipset_manufacturer: string;
   chipset: string;
@@ -63,6 +66,9 @@ interface Draft {
   test_notes: string;
   location: PickedLocation | null;
   order: string; // position inside the location; "" = none
+  is_stock: boolean;
+  quantity: string;
+  low_stock_level: string; // "" = no warning
   notes: string;
   acquired_on: string;
   verified_on: string;
@@ -89,6 +95,7 @@ function toDraft(item: Item): Draft {
     manufacturer: text(item.manufacturer),
     model: item.model,
     part_number: text(item.part_number),
+    barcode: text(item.barcode),
     revision: text(item.revision),
     chipset_manufacturer: text(item.chipset_manufacturer),
     chipset: text(item.chipset),
@@ -97,6 +104,9 @@ function toDraft(item: Item): Draft {
     test_notes: text(item.test_notes),
     location: item.location_id != null ? { id: item.location_id, full_name: item.location_path ?? "" } : null,
     order: item.order !== null ? String(item.order) : "",
+    is_stock: item.is_stock,
+    quantity: String(item.quantity),
+    low_stock_level: item.low_stock_level !== null ? String(item.low_stock_level) : "",
     notes: text(item.notes),
     acquired_on: text(item.acquired_on),
     verified_on: text(item.verified_on),
@@ -127,6 +137,7 @@ function diff(item: Item, d: Draft): ItemUpdate {
   if (d.model.trim() !== item.model) patch.model = d.model.trim();
   if (nullable(d.manufacturer) !== item.manufacturer) patch.manufacturer = nullable(d.manufacturer);
   if (nullable(d.part_number) !== item.part_number) patch.part_number = nullable(d.part_number);
+  if (nullable(d.barcode) !== item.barcode) patch.barcode = nullable(d.barcode);
   if (nullable(d.revision) !== item.revision) patch.revision = nullable(d.revision);
   if (nullable(d.chipset_manufacturer) !== item.chipset_manufacturer) patch.chipset_manufacturer = nullable(d.chipset_manufacturer);
   if (nullable(d.chipset) !== item.chipset) patch.chipset = nullable(d.chipset);
@@ -136,6 +147,11 @@ function diff(item: Item, d: Draft): ItemUpdate {
   if ((d.location?.id ?? null) !== item.location_id) patch.location_id = d.location?.id ?? null;
   const order = d.order.trim() === "" ? null : Number(d.order);
   if (order !== item.order) patch.order = order;
+  if (d.is_stock !== item.is_stock) patch.is_stock = d.is_stock;
+  const quantity = d.quantity.trim() === "" ? 1 : Number(d.quantity);
+  if (Number.isInteger(quantity) && quantity >= 0 && quantity !== item.quantity) patch.quantity = quantity;
+  const level = d.low_stock_level.trim() === "" ? null : Number(d.low_stock_level);
+  if ((level === null || (Number.isInteger(level) && level >= 0)) && level !== item.low_stock_level) patch.low_stock_level = level;
   if (nullable(d.notes) !== item.notes) patch.notes = nullable(d.notes);
   if ((d.acquired_on || null) !== item.acquired_on) patch.acquired_on = d.acquired_on || null;
   if ((d.verified_on || null) !== item.verified_on) patch.verified_on = d.verified_on || null;
@@ -223,6 +239,11 @@ function ItemEditor({ item }: { item: Item }) {
   const category = (categories.data ?? []).find((c) => String(c.id) === draft.category_id);
   const profile: CategoryField[] = category?.fields ?? [];
   const profileNames = new Set(profile.filter((f) => !f.column).map((f) => f.name.toLowerCase()));
+  // The category decides which standard fields are shown and what they are called.
+  const shown = (k: CoreKey) => coreShown(category, k);
+  const label = (k: CoreKey, fallback: string) => coreLabel(category, k, fallback);
+  const showConditionSection = shown("condition") || shown("test_status");
+  const showReference = refKindOf(category?.name ?? item.category_name) !== null || item.reference !== null;
 
   // Values already used for the spec being edited, as suggestions.
   const suggestions = useQuery({
@@ -317,12 +338,19 @@ function ItemEditor({ item }: { item: Item }) {
             <h1 className="text-3xl font-semibold tracking-tight">{[item.manufacturer, item.model].filter(Boolean).join(" ")}</h1>
             {item.spec_line && <p className="text-base text-muted-foreground">{item.spec_line}</p>}
             <div className="flex flex-wrap items-center gap-2">
-              <TestStatusBadge status={item.test_status} />
-              <ConditionBadge condition={item.condition} />
-              <ConfidenceBadge confidence={item.identification_confidence} />
-              <span className="pl-1 text-sm text-muted-foreground">
-                {item.last_tested_on ? `Last tested ${item.last_tested_on}` : "No test logged yet"}
-              </span>
+              {shown("test_status") && <TestStatusBadge status={item.test_status} label={valueLabel(category, "test_status", item.test_status)} />}
+              {shown("condition") && <ConditionBadge condition={item.condition} label={valueLabel(category, "condition", item.condition)} />}
+              {item.is_stock && (
+                <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs" title={label("stock", "Quantity")}>
+                  ×{item.quantity.toLocaleString()}
+                </span>
+              )}
+              {shown("confidence") && <ConfidenceBadge confidence={item.identification_confidence} />}
+              {shown("test_status") && (
+                <span className="pl-1 text-sm text-muted-foreground">
+                  {item.last_tested_on ? `Last tested ${item.last_tested_on}` : "No test logged yet"}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -347,6 +375,7 @@ function ItemEditor({ item }: { item: Item }) {
                       manufacturer: item.manufacturer ?? "",
                       partNumber: item.part_number ?? "",
                       chipset: item.chipset ?? "",
+                      isStock: item.is_stock,
                       specs: {
                         ...Object.fromEntries(Object.entries(item.attributes).map(([k, v]) => [k, asText(v)])),
                         ...(item.chipset_manufacturer ? { "col:chipset_manufacturer": item.chipset_manufacturer } : {}),
@@ -357,6 +386,9 @@ function ItemEditor({ item }: { item: Item }) {
                   }
                 >
                   <Copy /> Add another like this
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => router.push(`/labels?ids=${item.id}`)}>
+                  <Printer /> Print label
                 </DropdownMenuItem>
                 <DropdownMenuItem className="text-destructive" onClick={() => setConfirmDelete(true)}>
                   <Trash2 /> Delete this item
@@ -369,6 +401,7 @@ function ItemEditor({ item }: { item: Item }) {
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="grid min-w-0 content-start gap-6">
+          {item.is_stock && <StockPanel item={item} label={label("stock", "in stock")} locked={dirty} />}
           <form
             className="grid gap-6"
             onSubmit={(e) => {
@@ -387,27 +420,67 @@ function ItemEditor({ item }: { item: Item }) {
                     options={(categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
                   />
                 </Field>
-                <Field label="Manufacturer" htmlFor="f-manufacturer">
-                  <Input id="f-manufacturer" value={draft.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
-                </Field>
-                <Field label="Model / description" htmlFor="f-model" className="sm:col-span-2">
+                {shown("manufacturer") && (
+                  <Field label={label("manufacturer", "Manufacturer")} htmlFor="f-manufacturer">
+                    <Input id="f-manufacturer" value={draft.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
+                  </Field>
+                )}
+                <Field label={label("model", "Model / description")} htmlFor="f-model" className="sm:col-span-2">
                   <Input id="f-model" value={draft.model} onChange={(e) => set("model", e.target.value)} />
                 </Field>
-                <Field label="Part number" htmlFor="f-pn">
-                  <Input id="f-pn" placeholder="order / part number" value={draft.part_number} onChange={(e) => set("part_number", e.target.value)} />
+                {shown("part_number") && (
+                  <Field label={label("part_number", "Part number")} htmlFor="f-pn">
+                    <Input id="f-pn" placeholder="order / part number" value={draft.part_number} onChange={(e) => set("part_number", e.target.value)} />
+                  </Field>
+                )}
+                {shown("barcode") && (
+                  <Field
+                    label={label("barcode", "Barcode")}
+                    htmlFor="f-barcode"
+                    hint={`The original barcode from the packaging, if it has one. Empty: labels and scans use the item's own code (${item.inventory_code}).`}
+                  >
+                    <Input
+                      id="f-barcode"
+                      maxLength={100}
+                      value={draft.barcode}
+                      onChange={(e) => set("barcode", e.target.value)}
+                      // A scanner ends the code with Enter: that must not save the item.
+                      onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+                    />
+                  </Field>
+                )}
+                {shown("confidence") && (
+                  <Field label={label("confidence", "How sure are you of the exact model?")} htmlFor="f-conf">
+                    <SimpleSelect
+                      id="f-conf"
+                      className="w-full"
+                      value={draft.identification_confidence}
+                      onChange={(v) => set("identification_confidence", v as Confidence)}
+                      options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
+                    />
+                  </Field>
+                )}
+                <Field label="Track as stock" htmlFor="f-stock" hint="Count how many you have, with take out and add. Switching it off keeps the number.">
+                  <label className="flex cursor-pointer items-center gap-2 pt-1 text-sm">
+                    <input id="f-stock" type="checkbox" className="size-4 accent-primary" checked={draft.is_stock} onChange={(e) => setDraft({ ...draft, is_stock: e.target.checked })} />
+                    This is a stock item
+                  </label>
                 </Field>
-                <Field label="How sure are you of the exact model?" htmlFor="f-conf">
-                  <SimpleSelect
-                    id="f-conf"
-                    className="w-full"
-                    value={draft.identification_confidence}
-                    onChange={(v) => set("identification_confidence", v as Confidence)}
-                    options={CONFIDENCES.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))}
-                  />
-                </Field>
-                <Field label="Notes" htmlFor="f-notes" className="sm:col-span-2">
-                  <Textarea id="f-notes" rows={3} value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
-                </Field>
+                {draft.is_stock && (
+                  <>
+                    <Field label={label("stock", "Quantity")} htmlFor="f-qty" hint="Set it exactly here (after counting). To take some out or add some, use Stock above.">
+                      <Input id="f-qty" type="number" min={0} inputMode="numeric" value={draft.quantity} onChange={(e) => set("quantity", e.target.value)} />
+                    </Field>
+                    <Field label="Warn me at" htmlFor="f-low" hint="Show a Low tag when this many or fewer are left. Empty = no warning.">
+                      <Input id="f-low" type="number" min={0} inputMode="numeric" value={draft.low_stock_level} onChange={(e) => set("low_stock_level", e.target.value)} />
+                    </Field>
+                  </>
+                )}
+                {shown("notes") && (
+                  <Field label={label("notes", "Notes")} htmlFor="f-notes" className="sm:col-span-2">
+                    <Textarea id="f-notes" rows={3} value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
+                  </Field>
+                )}
               </div>
             </Section>
 
@@ -523,36 +596,47 @@ function ItemEditor({ item }: { item: Item }) {
               </div>
             </Section>
 
-            <Section title="Condition &amp; testing" description="Condition is how it looks. Test status is whether it works.">
-              <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                <Field label="Physical condition" htmlFor="f-cond">
-                  <SimpleSelect
-                    id="f-cond"
-                    className="w-full"
-                    value={draft.condition}
-                    onChange={(v) => set("condition", v as Condition)}
-                    options={CONDITIONS.map((c) => ({ value: c, label: c }))}
-                  />
-                </Field>
-                <Field label="Test status" htmlFor="f-test">
-                  <SimpleSelect
-                    id="f-test"
-                    className="w-full"
-                    value={draft.test_status}
-                    onChange={(v) => set("test_status", v as TestStatus)}
-                    options={TEST_STATUSES.map((s) => ({ value: s, label: s }))}
-                  />
-                </Field>
-                <Field
-                  label="Test notes"
-                  htmlFor="f-tnotes"
-                  className="sm:col-span-2"
-                  hint="What was tested, or why testing is blocked. “Unknown” means it cannot be tested right now; “Untested” means not tried yet."
-                >
-                  <Textarea id="f-tnotes" rows={2} value={draft.test_notes} onChange={(e) => set("test_notes", e.target.value)} />
-                </Field>
-              </div>
-            </Section>
+            {showConditionSection && (
+              <Section
+                title={shown("test_status") ? "Condition & testing" : label("condition", "Condition")}
+                description={shown("condition") && shown("test_status") ? "Condition is how it looks. Test status is whether it works." : undefined}
+              >
+                <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                  {shown("condition") && (
+                    <Field label={label("condition", "Physical condition")} htmlFor="f-cond">
+                      <SimpleSelect
+                        id="f-cond"
+                        className="w-full"
+                        value={draft.condition}
+                        onChange={(v) => set("condition", v as Condition)}
+                        options={visibleValues(category, "condition", CONDITIONS, draft.condition).map((c) => ({ value: c, label: valueLabel(category, "condition", c) }))}
+                      />
+                    </Field>
+                  )}
+                  {shown("test_status") && (
+                    <Field label={label("test_status", "Test status")} htmlFor="f-test">
+                      <SimpleSelect
+                        id="f-test"
+                        className="w-full"
+                        value={draft.test_status}
+                        onChange={(v) => set("test_status", v as TestStatus)}
+                        options={visibleValues(category, "test_status", TEST_STATUSES, draft.test_status).map((s) => ({ value: s, label: valueLabel(category, "test_status", s) }))}
+                      />
+                    </Field>
+                  )}
+                  {shown("test_status") && (
+                    <Field
+                      label="Test notes"
+                      htmlFor="f-tnotes"
+                      className="sm:col-span-2"
+                      hint="What was tested, or why testing is blocked. “Unknown” means it cannot be tested right now; “Untested” means not tried yet."
+                    >
+                      <Textarea id="f-tnotes" rows={2} value={draft.test_notes} onChange={(e) => set("test_notes", e.target.value)} />
+                    </Field>
+                  )}
+                </div>
+              </Section>
+            )}
 
             <Section title="Where it is">
               <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
@@ -575,17 +659,21 @@ function ItemEditor({ item }: { item: Item }) {
                     onChange={(e) => set("order", e.target.value)}
                   />
                 </Field>
-                <Field label="Acquired on" htmlFor="f-acq">
-                  <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />
-                </Field>
-                <Field label="Last verified" htmlFor="f-ver" hint="When you last saw it in place.">
-                  <div className="flex gap-2">
-                    <Input id="f-ver" type="date" value={draft.verified_on} onChange={(e) => set("verified_on", e.target.value)} />
-                    <Button type="button" variant="outline" onClick={() => set("verified_on", new Date().toLocaleDateString("en-CA"))}>
-                      Today
-                    </Button>
-                  </div>
-                </Field>
+                {shown("acquired_on") && (
+                  <Field label={label("acquired_on", "Acquired on")} htmlFor="f-acq">
+                    <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />
+                  </Field>
+                )}
+                {shown("verified_on") && (
+                  <Field label={label("verified_on", "Last verified")} htmlFor="f-ver" hint="When you last saw it in place.">
+                    <div className="flex gap-2">
+                      <Input id="f-ver" type="date" value={draft.verified_on} onChange={(e) => set("verified_on", e.target.value)} />
+                      <Button type="button" variant="outline" onClick={() => set("verified_on", new Date().toLocaleDateString("en-CA"))}>
+                        Today
+                      </Button>
+                    </div>
+                  </Field>
+                )}
               </div>
             </Section>
             <button type="submit" className="sr-only" tabIndex={-1}>
@@ -597,8 +685,8 @@ function ItemEditor({ item }: { item: Item }) {
             <FileManager item={item} />
           </Section>
 
-          <TestHistory item={item} locked={dirty} />
-          <ReferencePanel item={item} locked={dirty} />
+          {shown("test_status") && <TestHistory item={item} locked={dirty} />}
+          {showReference && <ReferencePanel item={item} locked={dirty} />}
         </div>
 
         <aside className="grid content-start gap-6 lg:sticky lg:top-20">

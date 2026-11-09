@@ -8,10 +8,13 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { AUTH_KEY } from "@/components/auth-gate";
 import { useQuickAdd } from "@/components/quick-add";
+import { ScanListener } from "@/components/scan-listener";
+import { SETUP_KEY } from "@/components/setup-gate";
 import { VersionTag } from "@/components/version-tag";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { afterQuietKey } from "@/lib/scan";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -37,6 +40,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { open } = useQuickAdd();
   const { resolvedTheme, setTheme } = useTheme();
   const [help, setHelp] = useState(false);
+  const setup = useQuery({ queryKey: SETUP_KEY, queryFn: api.setup, staleTime: 5 * 60_000 });
+  const title = setup.data?.title ?? "Hoardware";
+  // The tab title carries the collection's name too (the page templates say "Hoardware").
+  useEffect(() => {
+    if (title === "Hoardware") return;
+    const id = setTimeout(() => {
+      document.title = document.title.includes("Hoardware") ? document.title.replaceAll("Hoardware", title) : `${document.title} · ${title}`;
+    }, 50);
+    return () => clearTimeout(id);
+  }, [title, pathname]);
   const queryClient = useQueryClient();
   const auth = useQuery({ queryKey: AUTH_KEY, queryFn: api.authStatus, staleTime: 60_000 });
   // Things that need attention but do not stop the app: late backups, unreachable photo storage.
@@ -61,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       if (document.querySelector("[role=dialog], [role=alertdialog]")) return;
       e.preventDefault();
-      setHelp(true);
+      afterQuietKey(() => setHelp(true));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -74,9 +87,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       e.preventDefault();
-      const input = document.getElementById("search-input") as HTMLInputElement | null;
-      if (input) input.focus();
-      else router.push("/?focus=1");
+      // Not while a scanner is typing a code: its characters are not shortcuts.
+      afterQuietKey(() => {
+        const input = document.getElementById("search-input") as HTMLInputElement | null;
+        if (input) input.focus();
+        else router.push("/?focus=1");
+      });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -86,8 +102,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur print:hidden">
         <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-2 px-4 sm:gap-4">
-          <Link href="/" aria-label="Hoardware" className="flex items-center gap-2 font-semibold tracking-tight">
-            <Cpu className="size-5" /> <span className="hidden sm:inline">Hoardware</span>
+          <Link href="/" aria-label={title} className="flex items-center gap-2 font-semibold tracking-tight">
+            <Cpu className="size-5" /> <span className="hidden max-w-48 truncate sm:inline">{title}</span>
           </Link>
           <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm sm:gap-1">
             {NAV.map((n) => {
@@ -163,6 +179,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </dl>
         </DialogContent>
       </Dialog>
+      <ScanListener />
       <VersionTag />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 print:max-w-none print:p-0">{children}</main>
     </div>

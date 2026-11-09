@@ -20,18 +20,18 @@ const CONDITION_STYLES: Record<Condition, string> = {
   Unknown: "text-muted-foreground",
 };
 
-export function TestStatusBadge({ status, className }: { status: TestStatus; className?: string }) {
+export function TestStatusBadge({ status, label, className }: { status: TestStatus; label?: string; className?: string }) {
   return (
     <Badge variant="secondary" className={cn("border-0", TEST_STYLES[status], className)}>
-      {status}
+      {label ?? status}
     </Badge>
   );
 }
 
-export function ConditionBadge({ condition, className }: { condition: Condition; className?: string }) {
+export function ConditionBadge({ condition, label, className }: { condition: Condition; label?: string; className?: string }) {
   return (
     <Badge variant="outline" className={cn(CONDITION_STYLES[condition], className)}>
-      {condition}
+      {label ?? condition}
     </Badge>
   );
 }

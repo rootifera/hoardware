@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from app.enums import Condition, FileKind, IdentificationConfidence, PhotoRole, TestStatus
 
@@ -20,6 +20,8 @@ def _strip(value: Any) -> Any:
 # Optional text: surrounding whitespace is trimmed and "" becomes null.
 OptText = Annotated[Annotated[str, Field(max_length=10_000)] | None, BeforeValidator(_blank_to_none)]
 OptShort = Annotated[Annotated[str, Field(max_length=300)] | None, BeforeValidator(_blank_to_none)]
+# A barcode is what a scanner types: printable characters, no line breaks.
+OptBarcode = Annotated[Annotated[str, Field(max_length=100, pattern=r"^[\x20-\x7e]+$")] | None, BeforeValidator(_blank_to_none)]
 ReqShort = Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=300)]
 
 T = TypeVar("T")
@@ -66,10 +68,62 @@ def _check_fields(fields: list[CategoryField]) -> list[CategoryField]:
     return fields
 
 
+# The standard fields a category can hide or rename. "model" can be renamed but not hidden:
+# it is what identifies an item.
+CORE_FIELDS = ("manufacturer", "model", "part_number", "barcode", "confidence", "condition", "test_status", "stock", "notes", "acquired_on", "verified_on")
+# Fields whose stored values can be shown under another name (the stored value never changes).
+RENAMEABLE_VALUES = {"condition": [c.value for c in Condition], "test_status": [t.value for t in TestStatus]}
+_Label = Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=40)]
+
+
+class CoreFieldSetting(BaseModel):
+    show: bool | None = None  # None = the default (shown)
+    label: _Label | None = None  # None = the default name
+
+    @model_serializer(mode="wrap")
+    def _only_what_was_set(self, handler):
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+class CategorySettings(BaseModel):
+    core: dict[str, CoreFieldSetting] = Field(default_factory=dict)
+    values: dict[str, dict[str, _Label]] = Field(default_factory=dict)
+    # Values this category does not offer (hidden from the pick lists; an item that already has one keeps it).
+    hidden: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self):
+        for key, setting in self.core.items():
+            if key not in CORE_FIELDS:
+                raise ValueError(f"unknown standard field “{key}”")
+            if key == "model" and setting.show is False:
+                raise ValueError("the model / description cannot be hidden: it is what identifies an item")
+        for key, names in self.values.items():
+            allowed = RENAMEABLE_VALUES.get(key)
+            if allowed is None:
+                raise ValueError(f"“{key}” has no values that can be renamed")
+            for stored in names:
+                if stored not in allowed:
+                    raise ValueError(f"“{stored}” is not a {key.replace('_', ' ')} value")
+        for key, stored_values in self.hidden.items():
+            allowed = RENAMEABLE_VALUES.get(key)
+            if allowed is None:
+                raise ValueError(f"“{key}” has no values that can be hidden")
+            for stored in stored_values:
+                if stored not in allowed:
+                    raise ValueError(f"“{stored}” is not a {key.replace('_', ' ')} value")
+            if len(set(stored_values)) != len(stored_values):
+                raise ValueError(f"a {key.replace('_', ' ')} value is hidden twice")
+            if len(set(stored_values)) >= len(allowed):
+                raise ValueError(f"at least one {key.replace('_', ' ')} value has to stay available")
+        return self
+
+
 class CategoryIn(BaseModel):
     name: Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=100)]
     sort_order: int = 0
     fields: list[CategoryField] = Field(default_factory=list)
+    settings: CategorySettings = Field(default_factory=CategorySettings)
 
     _fields = field_validator("fields")(_check_fields)
 
@@ -78,6 +132,7 @@ class CategoryUpdate(BaseModel):
     name: Annotated[Annotated[str, Field(min_length=1, max_length=100)] | None, BeforeValidator(_strip)] = None
     sort_order: int | None = None
     fields: list[CategoryField] | None = None
+    settings: CategorySettings | None = None
 
     @field_validator("fields")
     @classmethod
@@ -92,6 +147,7 @@ class CategoryOut(BaseModel):
     name: str
     sort_order: int
     fields: list[CategoryField]
+    settings: CategorySettings
 
 
 # --- locations ----------------------------------------------------------------
@@ -193,6 +249,10 @@ class ItemSummary(BaseModel):
     location_id: int | None
     location_path: str | None
     order: int | None
+    is_stock: bool
+    quantity: int
+    low_stock_level: int | None = None
+    barcode: str | None = None
     thumbnail_url: str | None
     # Key specs of the matched reference model, if any (one line).
     spec_line: str | None = None
@@ -314,6 +374,10 @@ class ItemCreate(_ItemFields):
     test_notes: OptText = None
     location_id: int | None = None
     order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+    is_stock: bool = False
+    quantity: Annotated[int, Field(ge=0, le=1_000_000_000)] = 1
+    low_stock_level: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    barcode: OptBarcode = None
     notes: OptText = None
     acquired_on: date | None = None
     verified_on: date | None = None
@@ -360,6 +424,10 @@ class ItemUpdate(_ItemFields):
     test_notes: OptText = None
     location_id: int | None = None
     order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+    is_stock: bool | None = None
+    quantity: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    low_stock_level: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    barcode: OptBarcode = None
     notes: OptText = None
     acquired_on: date | None = None
     verified_on: date | None = None
@@ -368,12 +436,43 @@ class ItemUpdate(_ItemFields):
 
     # Columns that are NOT NULL: an explicit null is rejected instead of
     # failing later in the database.
-    @field_validator("category_id", "model", "condition", "test_status", "identification_confidence", "attributes")
+    @field_validator("category_id", "model", "condition", "test_status", "identification_confidence", "attributes", "quantity", "is_stock")
     @classmethod
     def _not_null(cls, value: Any) -> Any:
         if value is None:
             raise ValueError("this field cannot be null")
         return value
+
+
+# --- stock ----------------------------------------------------------------------
+
+
+class StockChangeIn(BaseModel):
+    # Negative takes out, positive adds.
+    change: Annotated[int, Field(ge=-1_000_000_000, le=1_000_000_000)]
+    note: Annotated[str | None, Field(max_length=200), BeforeValidator(_blank_to_none)] = None
+
+    @field_validator("change")
+    @classmethod
+    def _not_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("the change cannot be zero")
+        return value
+
+
+class StockLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    change: int
+    quantity_after: int
+    note: str | None
+    created_at: datetime
+
+
+class StockResultOut(BaseModel):
+    quantity: int
+    entry: StockLogOut
 
 
 # --- bulk actions ---------------------------------------------------------------
@@ -395,6 +494,7 @@ class BulkFilter(BaseModel):
     unassigned: bool = False
     never_verified: bool = False
     verified_before: date | None = None
+    low_stock: bool = False
 
 
 class BulkSelection(BaseModel):
@@ -439,6 +539,27 @@ class BulkIn(BaseModel):
     #            keeping their relative order
     positions: Literal["clear", "keep", "append"] = "clear"
     dry_run: bool = False
+
+
+class ScanMatch(BaseModel):
+    id: int
+    inventory_code: str
+    manufacturer: str | None
+    model: str
+    barcode: str | None
+
+
+class LabelOut(BaseModel):
+    """What a printed label shows."""
+
+    id: int
+    inventory_code: str
+    # What the barcode encodes: the item's original barcode if it has one, else its own code.
+    barcode: str
+    manufacturer: str | None
+    model: str
+    category_name: str
+    location_path: str | None
 
 
 class BulkDeleteIn(BaseModel):

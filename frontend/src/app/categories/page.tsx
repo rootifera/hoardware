@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ListChecks, Plus, Trash2 } from "lucide-react";
+import { ListChecks, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { CategoryFieldsDialog } from "@/components/category-fields-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,12 +57,67 @@ function CategoryRow({ category, onDelete, onEditFields }: { category: Category;
   );
 }
 
+/** Add the categories of a ready-made set (PC hardware, music gear, trading cards…) to the ones you have. */
+function StarterSets({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const presets = useQuery({ queryKey: ["presets"], queryFn: api.presets, enabled: open, staleTime: 5 * 60_000 });
+  const existing = useQuery({ queryKey: ["categories"], queryFn: api.categories, enabled: open });
+  const have = new Set((existing.data ?? []).map((c) => c.name.toLowerCase()));
+  const add = useMutation({
+    mutationFn: (key: string) => api.applyPreset(key),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      toast.success(r.added.length ? `Added ${r.added.join(", ")}` : "Nothing to add: you already have all of these");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Add a starter set</DialogTitle>
+          <DialogDescription>
+            Adds that set&apos;s categories, with their fields and predefined values, next to yours. Categories you already have are never changed.
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="grid gap-2">
+          {(presets.data ?? []).map((p) => {
+            const missing = p.categories.filter((c) => !have.has(c.toLowerCase()));
+            return (
+              <li key={p.key} className="flex items-start gap-3 rounded-lg border p-3">
+                <Package className="mt-0.5 size-4 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{p.name}</div>
+                  <div className="text-sm text-muted-foreground">{p.description}</div>
+                  {p.key !== "blank" && <div className="mt-1 text-xs text-muted-foreground">{p.categories.join(" · ")}</div>}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  aria-label={`Add ${p.name}`}
+                  disabled={add.isPending || missing.length === 0}
+                  onClick={() => add.mutate(p.key)}
+                >
+                  {add.isPending && add.variables === p.key ? <Loader2 className="animate-spin" /> : null}
+                  {missing.length === 0 ? "Added" : "Add"}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function CategoriesPage() {
   const queryClient = useQueryClient();
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories });
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Category | null>(null);
   const [editing, setEditing] = useState<Category | null>(null);
+  const [starters, setStarters] = useState(false);
 
   const create = useMutation({
     mutationFn: () => api.createCategory({ name: name.trim(), sort_order: (categories.data?.length ?? 0) * 10 }),
@@ -105,6 +161,11 @@ export default function CategoriesPage() {
           <Plus /> Add
         </Button>
       </form>
+      <div>
+        <Button variant="outline" size="sm" onClick={() => setStarters(true)}>
+          <Package /> Add a starter set…
+        </Button>
+      </div>
       {categories.isPending ? (
         <Skeleton className="h-64 w-full" />
       ) : categories.isError ? (
@@ -117,6 +178,7 @@ export default function CategoriesPage() {
         </ul>
       )}
       <CategoryFieldsDialog category={editing} onClose={() => setEditing(null)} />
+      <StarterSets open={starters} onClose={() => setStarters(false)} />
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

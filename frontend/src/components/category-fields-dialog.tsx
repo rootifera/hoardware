@@ -10,13 +10,33 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { Category, CategoryField } from "@/lib/types";
+import { CORE_FIELDS, defaultShown, type CoreKey } from "@/lib/category-config";
+import { CONDITIONS, TEST_STATUSES, type Category, type CategoryField, type CategorySettings } from "@/lib/types";
 
 const COLUMN_FIELDS: { column: NonNullable<CategoryField["column"]>; name: string; hint: string }[] = [
   { column: "chipset_manufacturer", name: "Chipset maker", hint: "e.g. NVIDIA" },
   { column: "chipset", name: "Chipset", hint: "e.g. RIVA TNT2 Ultra" },
   { column: "revision", name: "Revision", hint: "board revision" },
 ];
+
+/** Drop empty names and settings that just say "the default", so only real choices are stored. */
+function tidy(settings: CategorySettings): CategorySettings {
+  const core: CategorySettings["core"] = {};
+  for (const [key, value] of Object.entries(settings.core)) {
+    const label = value.label?.trim();
+    const differs = value.show != null && value.show !== defaultShown(key as CoreKey);
+    const entry = { ...(differs ? { show: value.show } : {}), ...(label ? { label } : {}) };
+    if (Object.keys(entry).length) core[key] = entry;
+  }
+  const values: CategorySettings["values"] = {};
+  for (const [kind, names] of Object.entries(settings.values)) {
+    const kept = Object.fromEntries(Object.entries(names).filter(([, name]) => name.trim()).map(([stored, name]) => [stored, name.trim()]));
+    if (Object.keys(kept).length) values[kind] = kept;
+  }
+  const hidden: NonNullable<CategorySettings["hidden"]> = {};
+  for (const [kind, stored] of Object.entries(settings.hidden ?? {})) if (stored.length) hidden[kind] = stored;
+  return { core, values, hidden };
+}
 
 /** Edit which fields items of one category are described with. */
 export function CategoryFieldsDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
@@ -32,9 +52,19 @@ export function CategoryFieldsDialog({ category, onClose }: { category: Category
 function FieldsForm({ category, onClose }: { category: Category; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<CategoryField[]>(category.fields);
+  const [settings, setSettings] = useState<CategorySettings>({
+    core: category.settings?.core ?? {},
+    values: category.settings?.values ?? {},
+    hidden: category.settings?.hidden ?? {},
+  });
+  const [tab, setTab] = useState<"specs" | "details">("specs");
 
   const save = useMutation({
-    mutationFn: () => api.updateCategory(category.id, { fields: fields.filter((f) => f.name.trim()).map((f) => ({ ...f, name: f.name.trim() })) }),
+    mutationFn: () =>
+      api.updateCategory(category.id, {
+        fields: fields.filter((f) => f.name.trim()).map((f) => ({ ...f, name: f.name.trim() })),
+        settings: tidy(settings),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["categories"] });
       toast.success(`${category.name} fields saved`);
@@ -49,18 +79,130 @@ function FieldsForm({ category, onClose }: { category: Category; onClose: () => 
     [next[index], next[index + by]] = [next[index + by], next[index]];
     setFields(next);
   };
+  const setCore = (key: CoreKey, patch: { show?: boolean; label?: string }) =>
+    setSettings((cur) => {
+      const merged = { ...(cur.core[key] ?? {}), ...patch };
+      return { ...cur, core: { ...cur.core, [key]: merged } };
+    });
+  const setOffered = (kind: "condition" | "test_status", stored: string, offered: boolean) =>
+    setSettings((cur) => {
+      const hidden = new Set(cur.hidden?.[kind] ?? []);
+      if (offered) hidden.delete(stored);
+      else hidden.add(stored);
+      return { ...cur, hidden: { ...(cur.hidden ?? {}), [kind]: [...hidden] } };
+    });
+  const setValueName = (kind: "condition" | "test_status", stored: string, name: string) =>
+    setSettings((cur) => ({ ...cur, values: { ...cur.values, [kind]: { ...(cur.values[kind] ?? {}), [stored]: name } } }));
   const missingColumns = COLUMN_FIELDS.filter((c) => !fields.some((f) => f.column === c.column));
 
   return (
     <>
       <DialogHeader>
         <DialogTitle>{category.name} fields</DialogTitle>
-        <DialogDescription>
-          What items in this category are described with, in the order they appear on the item page. Renaming a field does not rename values already
-          saved on items.
-        </DialogDescription>
+        <DialogDescription>Choose what items in this category are described with, and which standard fields they show.</DialogDescription>
       </DialogHeader>
 
+      <div role="tablist" aria-label="What to customise" className="flex gap-1 border-b">
+        {(
+          [
+            ["specs", "Specifications"],
+            ["details", "Standard details"],
+          ] as const
+        ).map(([id, text]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === id ? "border-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setTab(id)}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+
+      {tab === "details" && (
+        <div className="max-h-[55vh] overflow-y-auto pr-1">
+          <p className="mb-3 text-sm text-muted-foreground">
+            Every item has these standard fields. Hide the ones this category does not need and give the rest the names that fit. Hiding only removes a
+            field from the forms and lists: anything already entered is kept.
+          </p>
+          <ul className="grid gap-3">
+            {CORE_FIELDS.map((f) => {
+              const setting = settings.core[f.key] ?? {};
+              const shown = setting.show ?? defaultShown(f.key);
+              const values = f.key === "condition" ? CONDITIONS : f.key === "test_status" ? TEST_STATUSES : null;
+              return (
+                <li key={f.key} className="rounded-lg border p-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      aria-label={f.key === "stock" ? "Start new items as stock items" : `Show ${f.label}`}
+                      checked={shown}
+                      disabled={!f.hideable}
+                      onChange={(e) => setCore(f.key, { show: e.target.checked })}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{f.label}</div>
+                      <div className="text-xs text-muted-foreground">{f.help}</div>
+                    </div>
+                    {f.key !== "stock" ? (
+                      <Input
+                        aria-label={`Name for ${f.label}`}
+                        placeholder={f.label}
+                        maxLength={40}
+                        disabled={!shown}
+                        value={setting.label ?? ""}
+                        onChange={(e) => setCore(f.key, { label: e.target.value })}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Ticked by default in Quick add</span>
+                    )}
+                  </div>
+                  {values && shown && (
+                    <details className="mt-2 text-sm">
+                      <summary className="cursor-pointer text-muted-foreground">Rename the values</summary>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Untick the values this category does not use. Give the others the names you want: the same slots, your words.
+                      </p>
+                      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                        {values.map((v) => (
+                          <label key={v} className="grid grid-cols-[auto_6rem_minmax(0,1fr)] items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="size-4 accent-primary"
+                              aria-label={`Offer ${v}`}
+                              checked={!(settings.hidden?.[f.key as "condition" | "test_status"] ?? []).includes(v)}
+                              onChange={(e) => setOffered(f.key as "condition" | "test_status", v, e.target.checked)}
+                            />
+                            {v}
+                            <Input
+                              aria-label={`Name for ${v}`}
+                              placeholder={v}
+                              maxLength={40}
+                              className="h-8"
+                              value={settings.values[f.key as "condition" | "test_status"]?.[v] ?? ""}
+                              onChange={(e) => setValueName(f.key as "condition" | "test_status", v, e.target.value)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {tab === "specs" && (
+      <>
+      <p className="text-sm text-muted-foreground">
+        The fields items are described with, in the order they appear on the item page. Renaming a field does not rename values already saved on items.
+      </p>
       <div className="max-h-[55vh] overflow-y-auto pr-1">
         {fields.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No fields yet. Items of this category only get the basic details.</p>}
         <ol className="grid gap-2">
@@ -119,6 +261,9 @@ function FieldsForm({ category, onClose }: { category: Category; onClose: () => 
           </Button>
         ))}
       </div>
+
+      </>
+      )}
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>

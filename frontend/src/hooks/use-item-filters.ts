@@ -25,6 +25,7 @@ export function useItemFilters() {
       location: p.get("location") ?? "",
       exact: p.get("exact") === "1",
       unassigned: p.get("unassigned") === "1",
+      lowStock: p.get("low_stock") === "1",
       verified: p.get("verified") ?? "",
       sort: sort && (SORTS as readonly string[]).includes(sort) ? sort : "newest",
       order: order === "asc" || order === "desc" ? order : "",
@@ -45,6 +46,7 @@ export function useItemFilters() {
       set("location", next.location);
       set("exact", next.exact ? "1" : "");
       set("unassigned", next.unassigned ? "1" : "");
+      set("low_stock", next.lowStock ? "1" : "");
       set("verified", next.verified);
       set("sort", next.sort === EMPTY_FILTERS.sort ? "" : next.sort);
       set("order", next.order);
