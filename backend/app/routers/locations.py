@@ -1,3 +1,4 @@
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session, aliased
 from app.db import get_session
 from app.models import Item, Location
 from app.pagination import apply_keyset, decode_cursor, encode_cursor
-from app.schemas import LocationDetail, LocationIn, LocationOut, LocationRef, LocationUpdate, Page
+from app.schemas import LabelOut, LocationDetail, LocationIn, LocationLabelsIn, LocationOut, LocationRef, LocationUpdate, Page
 from app.services import locations as service
 from app.services.items import _like_escape
 
@@ -74,6 +75,49 @@ def list_locations(
             last.full_name.lower() if q and q.strip() else last.name.lower(), last.id
         )
     return Page[LocationOut](items=[_out(r) for r in rows], next_cursor=next_cursor)
+
+
+def location_code(location_id: int) -> str:
+    """What a location's label encodes. The same shape as an item code, so a scanner types it the same way."""
+    return f"LOC-{location_id:06d}"
+
+
+_CODE = re.compile(r"^LOC-0*(\d{1,12})$", re.I)
+
+
+@router.get("/by-code/{code}", response_model=LocationDetail)
+def get_location_by_code(code: str, session: SessionDep):
+    """The location a scanned label (``LOC-000012``) belongs to."""
+    found = _CODE.match(code.strip())
+    if not found:
+        raise HTTPException(404, "location not found")
+    return get_location(int(found.group(1)), session)
+
+
+@router.post("/labels", response_model=list[LabelOut])
+def location_labels(body: LocationLabelsIn, session: SessionDep):
+    """The data for printing labels for locations (boxes, shelves, drawers): scanning one opens its contents."""
+    rows = session.execute(
+        select(Location.id, Location.name, Location.type, Location.full_name, Location.parent_id)
+        .where(Location.id.in_(body.ids))
+        .order_by(Location.full_name)
+    ).all()
+    parent_names = {
+        pid: name
+        for pid, name in session.execute(select(Location.id, Location.full_name).where(Location.id.in_({r[4] for r in rows if r[4]})))
+    }
+    return [
+        LabelOut(
+            id=r[0],
+            inventory_code=location_code(r[0]),
+            barcode=location_code(r[0]),
+            manufacturer=None,
+            model=r[1],
+            category_name=r[2] or "Location",
+            location_path=parent_names.get(r[4]),
+        )
+        for r in rows
+    ]
 
 
 @router.get("/types", response_model=list[str])

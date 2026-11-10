@@ -5,6 +5,7 @@ sequences) and are the source of truth for indexes; keep this file in step.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    Numeric,
     Text,
     func,
     text,
@@ -24,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.enums import Condition, FileKind, IdentificationConfidence, PhotoRole, TestStatus, sql_in
+from app.enums import Condition, FileKind, IdentificationConfidence, ItemStatus, PhotoRole, TestStatus, sql_in
 
 
 class Base(DeclarativeBase):
@@ -71,6 +73,7 @@ class Item(Base):
     __table_args__ = (
         CheckConstraint(f"condition IN ({sql_in(Condition)})", name="ck_items_condition"),
         CheckConstraint(f"test_status IN ({sql_in(TestStatus)})", name="ck_items_test_status"),
+        CheckConstraint(f"status IN ({sql_in(ItemStatus)})", name="ck_items_status"),
         CheckConstraint(
             f"identification_confidence IN ({sql_in(IdentificationConfidence)})",
             name="ck_items_identification_confidence",
@@ -106,6 +109,13 @@ class Item(Base):
     barcode: Mapped[str | None] = mapped_column(Text)
     # Warn when a stock item is down to this many (or fewer). Optional.
     low_stock_level: Mapped[int | None] = mapped_column(Integer)
+    # Where the item is in its life: in the collection, inside a build, lent out, sold, scrapped, or
+    # not owned yet (wishlist). Nothing is deleted when an item leaves the collection.
+    status: Mapped[str] = mapped_column(Text, server_default=ItemStatus.IN_COLLECTION.value)
+    status_note: Mapped[str | None] = mapped_column(Text)  # "lent to Sam", "sold on eBay"
+    installed_in_id: Mapped[int | None] = mapped_column(ForeignKey("items.id", ondelete="SET NULL"))
+    price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    source: Mapped[str | None] = mapped_column(Text)  # where it was bought / found
     notes: Mapped[str | None] = mapped_column(Text)
     acquired_on: Mapped[date | None] = mapped_column(Date)
     # Stock-take: when the item was last seen in place.
@@ -176,6 +186,19 @@ class ItemFile(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(Text, server_default=FileKind.OTHER.value)
     description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ItemHistory(Base):
+    """Where an item was and what state it was in: one row per change of location, status or build."""
+
+    __tablename__ = "item_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(Text)  # location | status | installed_in
+    old: Mapped[str | None] = mapped_column(Text)  # readable text, so it survives deleted locations
+    new: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

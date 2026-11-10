@@ -13,7 +13,8 @@ import { api } from "@/lib/api";
 import { looksLikeScan } from "@/lib/scan";
 import { anyShows, coreLabel, coreShown, valueLabel, visibleValues, type CoreKey } from "@/lib/category-config";
 import { cn } from "@/lib/utils";
-import { CONDITIONS, CONFIDENCES, EMPTY_FILTERS, type ItemFilters, type Sort } from "@/lib/types";
+import { resolveScan } from "@/lib/scan-open";
+import { CONDITIONS, CONFIDENCES, EMPTY_FILTERS, ITEM_STATUSES, ITEM_STATUS_LABELS, type ItemFilters, type Sort } from "@/lib/types";
 
 const SORT_LABELS: Record<Sort, string> = {
   newest: "Latest added",
@@ -21,6 +22,7 @@ const SORT_LABELS: Record<Sort, string> = {
   category: "Category",
   location: "Location",
   position: "Position in location",
+  spec: "Spec value",
 };
 
 /** Stock-take: when an item was last seen in place. */
@@ -81,6 +83,58 @@ function useUrlText(urlValue: string, commit: (value: string) => void) {
   return [text, setText] as const;
 }
 
+const SPEC_OPS = [
+  { value: "eq", label: "is" },
+  { value: "min", label: "at least" },
+  { value: "max", label: "at most" },
+];
+
+/** Filter (and sort) by one spec: "Socket is Socket 7", "Speed at least 200MHz". Numbers understand units. */
+function SpecFilter({ filters, setFilters }: { filters: ItemFilters; setFilters: (patch: Partial<ItemFilters>, opts?: { replace?: boolean }) => void }) {
+  const categoryId = filters.category ? Number(filters.category) : null;
+  const keys = useQuery({ queryKey: ["attribute-keys", categoryId], queryFn: () => api.attributeKeys(categoryId), staleTime: 60_000 });
+  const values = useQuery({
+    queryKey: ["attribute-values", filters.specKey, categoryId],
+    queryFn: () => api.attributeValues(filters.specKey, categoryId),
+    enabled: Boolean(filters.specKey) && filters.specOp === "eq",
+    staleTime: 60_000,
+  });
+  const [value, setValue] = useUrlText(filters.specValue, (specValue) => setFilters({ specValue }, { replace: true }));
+  const known = keys.data ?? [];
+  if (known.length === 0 && !filters.specKey) return null;
+  const options = [...new Set([...(filters.specKey ? [filters.specKey] : []), ...known])].map((k) => ({ value: k, label: k }));
+  return (
+    <div role="group" aria-label="Filter by spec" className="flex flex-wrap items-center gap-2">
+      <SimpleSelect
+        aria-label="Spec"
+        className="w-40"
+        value={filters.specKey}
+        onChange={(specKey) => setFilters({ specKey, specValue: "", specOp: "eq", sort: specKey || filters.sort !== "spec" ? filters.sort : "newest" })}
+        anyLabel="Filter by spec…"
+        options={options}
+      />
+      {filters.specKey && (
+        <>
+          <SimpleSelect aria-label="Spec comparison" className="w-28" value={filters.specOp} onChange={(specOp) => setFilters({ specOp: specOp as "eq" | "min" | "max" })} options={SPEC_OPS} />
+          <Input
+            aria-label="Spec value"
+            list="spec-value-suggestions"
+            placeholder={filters.specOp === "eq" ? "value" : "e.g. 200MHz"}
+            className="w-36"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <datalist id="spec-value-suggestions">
+            {(values.data ?? []).map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function FilterBar({
   filters,
   setFilters,
@@ -126,7 +180,7 @@ export function FilterBar({
 
   const dirty =
     filters.q || filters.category || filters.manufacturer || filters.condition || filters.test || filters.confidence ||
-    filters.location || filters.unassigned || filters.verified || filters.lowStock;
+    filters.location || filters.unassigned || filters.verified || filters.lowStock || filters.status || filters.specKey;
   const descending = filters.order ? filters.order === "desc" : filters.sort === "newest";
 
   return (
@@ -148,9 +202,8 @@ export function FilterBar({
             if (e.key !== "Enter" || !looksLikeScan(q)) return;
             e.preventDefault();
             // One match opens it; several (identical boxed items) stay in the list; none is a normal search.
-            api
-              .scanLookup(q.trim())
-              .then((found) => found.length === 1 && router.push(`/items/${found[0].id}`))
+            resolveScan(q.trim())
+              .then((r) => (r.kind === "item" || r.kind === "location") && router.push(r.href))
               .catch(() => {});
           }}
         />
@@ -202,6 +255,14 @@ export function FilterBar({
             options={visibleValues(scope, "condition", CONDITIONS, filters.condition).map((c) => ({ value: c, label: valueLabel(scope, "condition", c) }))}
           />
         )}
+        <SimpleSelect
+          aria-label="Item status"
+          className="w-44"
+          value={filters.status}
+          onChange={(status) => setFilters({ status })}
+          anyLabel="What I own"
+          options={[...ITEM_STATUSES.map((s) => ({ value: s, label: ITEM_STATUS_LABELS[s] })), { value: "all", label: "Everything" }]}
+        />
         {offers("confidence") && (
           <SimpleSelect
             aria-label="Identification"
@@ -232,6 +293,7 @@ export function FilterBar({
             onChange={(e) => setManufacturer(e.target.value)}
           />
         )}
+        <SpecFilter filters={filters} setFilters={setFilters} />
         <datalist id="manufacturer-suggestions">
           {(suggestions.data ?? []).map((m) => (
             <option key={m} value={m} />
@@ -284,7 +346,9 @@ export function FilterBar({
             className="w-36"
             value={filters.sort}
             onChange={(sort) => setFilters({ sort: sort as Sort, order: "" })}
-            options={Object.entries(SORT_LABELS).map(([value, label]) => ({ value, label }))}
+            options={Object.entries(SORT_LABELS)
+              .filter(([value]) => value !== "spec" || filters.specKey)
+              .map(([value, label]) => ({ value, label: value === "spec" ? `${filters.specKey} value` : label }))}
           />
           <Button
             variant="outline"

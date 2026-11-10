@@ -335,6 +335,7 @@ else
   }
   update_dataset cpu-db https://github.com/zymos/cpu-db cpu-db
   update_dataset gpus-specs https://github.com/RonnyMuthomi/GPUs-Specs gpus-specs
+  update_dataset pci-ids https://github.com/pciutils/pciids pci-ids
 fi
 
 echo

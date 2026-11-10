@@ -1,8 +1,10 @@
+import { ITEM_STATUSES } from "@/lib/types";
 import type {
   BulkChanges,
   CategoryField,
   CategorySettings,
   StockLogEntry,
+  ItemHistoryEntry,
   TestLogEntry,
   TestStatus,
   ImportOptions,
@@ -135,8 +137,17 @@ export function filterParams(f: ItemFilters): URLSearchParams {
   if (f.verified === "never") p.set("never_verified", "true");
   else if (f.verified) p.set("verified_before", daysAgo(Number(f.verified)));
   if (f.unassigned) p.set("unassigned", "true");
+  if (f.status === "all") ITEM_STATUSES.forEach((s) => p.append("status", s));
+  else if (f.status) p.set("status", f.status);
+  if (f.specKey) {
+    p.set("spec_key", f.specKey);
+    if (f.specValue.trim()) {
+      p.set("spec_op", f.specOp);
+      p.set("spec_value", f.specValue.trim());
+    }
+  }
   if (f.lowStock) p.set("low_stock", "true");
-  else if (f.location) {
+  if (f.location && !f.unassigned) {
     p.set("location_id", f.location);
     if (f.exact) p.set("include_descendants", "false");
   }
@@ -170,7 +181,7 @@ export const api = {
 
   items: (filters: ItemFilters, cursor: string | null, limit = 50) => {
     const p = filterParams(filters);
-    p.set("sort", filters.sort);
+    p.set("sort", filters.sort === "spec" && !filters.specKey ? "newest" : filters.sort);
     if (filters.order) p.set("order", filters.order);
     p.set("limit", String(limit));
     if (cursor) p.set("cursor", cursor);
@@ -190,9 +201,9 @@ export const api = {
   createItem: (body: ItemCreate) => request<ItemDetail>("/items", json("POST", body)),
   updateItem: (id: number, body: ItemUpdate) => request<ItemDetail>(`/items/${id}`, json("PATCH", body)),
   deleteItem: (id: number) => request<void>(`/items/${id}`, { method: "DELETE" }),
-  attributeValues: (key: string, categoryId: number) =>
-    request<string[]>(`/attribute-values?${new URLSearchParams({ key, category_id: String(categoryId) })}`),
-  attributeKeys: (categoryId: number) => request<string[]>(`/attribute-keys?category_id=${categoryId}`),
+  attributeValues: (key: string, categoryId?: number | null) =>
+    request<string[]>(`/attribute-values?${new URLSearchParams({ key, ...(categoryId ? { category_id: String(categoryId) } : {}) })}`),
+  attributeKeys: (categoryId?: number | null) => request<string[]>(`/attribute-keys${categoryId ? `?category_id=${categoryId}` : ""}`),
   manufacturers: (q: string) => request<string[]>(`/manufacturers?${new URLSearchParams({ q, limit: "15" })}`),
 
   uploadPhotos: (itemId: number, files: File[], role: PhotoRole = "other") => {
@@ -232,9 +243,18 @@ export const api = {
     request<{ id: number; inventory_code: string; manufacturer: string | null; model: string; barcode: string | null }[]>(
       `/items/lookup?${new URLSearchParams({ code })}`,
     ),
+  locationByCode: (code: string) => request<LocationDetail>(`/locations/by-code/${encodeURIComponent(code)}`),
+  locationLabels: (ids: number[]) =>
+    request<{ id: number; inventory_code: string; barcode: string; manufacturer: string | null; model: string; category_name: string; location_path: string | null }[]>(
+      "/locations/labels",
+      json("POST", { ids }),
+    ),
   itemByCode: (code: string) => request<{ id: number; inventory_code: string }>(`/items/by-code/${encodeURIComponent(code)}`),
   stockChange: (itemId: number, change: number, note?: string) =>
     request<{ quantity: number; entry: StockLogEntry }>(`/items/${itemId}/stock`, json("POST", { change, note: note || null })),
+  itemHistory: (itemId: number) => request<ItemHistoryEntry[]>(`/items/${itemId}/history`),
+  splitStock: (itemId: number, body: { quantity: number; location_id: number | null; order?: number | null }) =>
+    request<ItemDetail>(`/items/${itemId}/split`, json("POST", body)),
   stockLog: (itemId: number) => request<StockLogEntry[]>(`/items/${itemId}/stock-log`),
   bulkDelete: (selection: BulkSelection, dryRun = false) =>
     request<{ matched: number; deleted: number; dry_run: boolean }>("/items/bulk-delete", json("POST", { selection, dry_run: dryRun })),

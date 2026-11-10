@@ -3,7 +3,7 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_serializer, model_validator
 
-from app.enums import Condition, FileKind, IdentificationConfidence, PhotoRole, TestStatus
+from app.enums import Condition, FileKind, IdentificationConfidence, ItemStatus, PhotoRole, TestStatus
 
 
 def _blank_to_none(value: Any) -> Any:
@@ -22,6 +22,7 @@ OptText = Annotated[Annotated[str, Field(max_length=10_000)] | None, BeforeValid
 OptShort = Annotated[Annotated[str, Field(max_length=300)] | None, BeforeValidator(_blank_to_none)]
 # A barcode is what a scanner types: printable characters, no line breaks.
 OptBarcode = Annotated[Annotated[str, Field(max_length=100, pattern=r"^[\x20-\x7e]+$")] | None, BeforeValidator(_blank_to_none)]
+Price = Annotated[float, Field(ge=0, le=1_000_000_000)] | None
 ReqShort = Annotated[str, BeforeValidator(_strip), Field(min_length=1, max_length=300)]
 
 T = TypeVar("T")
@@ -253,6 +254,8 @@ class ItemSummary(BaseModel):
     quantity: int
     low_stock_level: int | None = None
     barcode: str | None = None
+    status: ItemStatus = ItemStatus.IN_COLLECTION
+    status_note: str | None = None
     thumbnail_url: str | None
     # Key specs of the matched reference model, if any (one line).
     spec_line: str | None = None
@@ -339,7 +342,38 @@ class TestLogOut(BaseModel):
     created_at: datetime
 
 
+class ItemRef(BaseModel):
+    """A short pointer to another item: a build, or a part of one."""
+
+    id: int
+    inventory_code: str
+    manufacturer: str | None = None
+    model: str
+    category_name: str | None = None
+
+
+class ItemHistoryOut(BaseModel):
+    id: int
+    kind: Literal["location", "status", "installed_in"]
+    old: str | None
+    new: str | None
+    created_at: datetime
+
+
+class SplitIn(BaseModel):
+    """Move part of a stock item's quantity to another location, as its own record."""
+
+    quantity: Annotated[int, Field(ge=1, le=1_000_000_000)]
+    location_id: int | None = None
+    order: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+
+
 class ItemDetail(ItemSummary):
+    installed_in_id: int | None = None
+    installed_in: ItemRef | None = None
+    parts: list[ItemRef] = []
+    price: float | None = None
+    source: str | None = None
     last_tested_on: date | None = None  # date of the newest test-history entry
     test_notes: str | None
     notes: str | None
@@ -377,6 +411,11 @@ class ItemCreate(_ItemFields):
     is_stock: bool = False
     quantity: Annotated[int, Field(ge=0, le=1_000_000_000)] = 1
     low_stock_level: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    status: ItemStatus = ItemStatus.IN_COLLECTION
+    status_note: OptShort = None
+    installed_in_id: int | None = None
+    price: Price = None
+    source: OptShort = None
     barcode: OptBarcode = None
     notes: OptText = None
     acquired_on: date | None = None
@@ -427,6 +466,11 @@ class ItemUpdate(_ItemFields):
     is_stock: bool | None = None
     quantity: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
     low_stock_level: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    status: ItemStatus | None = None
+    status_note: OptShort = None
+    installed_in_id: int | None = None
+    price: Price = None
+    source: OptShort = None
     barcode: OptBarcode = None
     notes: OptText = None
     acquired_on: date | None = None
@@ -436,7 +480,7 @@ class ItemUpdate(_ItemFields):
 
     # Columns that are NOT NULL: an explicit null is rejected instead of
     # failing later in the database.
-    @field_validator("category_id", "model", "condition", "test_status", "identification_confidence", "attributes", "quantity", "is_stock")
+    @field_validator("category_id", "model", "condition", "test_status", "identification_confidence", "attributes", "quantity", "is_stock", "status")
     @classmethod
     def _not_null(cls, value: Any) -> Any:
         if value is None:
@@ -495,6 +539,10 @@ class BulkFilter(BaseModel):
     never_verified: bool = False
     verified_before: date | None = None
     low_stock: bool = False
+    status: list[ItemStatus] = Field(default_factory=list)
+    spec_key: Annotated[str | None, Field(max_length=100)] = None
+    spec_op: Literal["eq", "min", "max"] = "eq"
+    spec_value: Annotated[str | None, Field(max_length=300)] = None
 
 
 class BulkSelection(BaseModel):
@@ -520,8 +568,20 @@ class BulkChanges(BaseModel):
     category_id: int | None = None
     location_id: int | None = None  # null = no location
     verified: bool | None = None  # true = seen in place today, false = clear
+    status: ItemStatus | None = None
+    status_note: OptShort = None
+    source: OptShort = None
+    price: Price = None
+    # Spec values to set on every selected item; a null value removes that spec.
+    attributes: Annotated[dict[Annotated[str, Field(min_length=1, max_length=100)], Annotated[str, Field(max_length=300)] | int | float | None], Field(max_length=20)] | None = None
 
-    @field_validator("condition", "test_status", "category_id", "verified")
+    @model_validator(mode="after")
+    def _status_rules(self):
+        if self.status == ItemStatus.INSTALLED:
+            raise ValueError("choose what an item is installed in on the item itself")
+        return self
+
+    @field_validator("condition", "test_status", "category_id", "verified", "status", "attributes")
     @classmethod
     def _not_null(cls, value: Any) -> Any:
         if value is None:
@@ -547,6 +607,10 @@ class ScanMatch(BaseModel):
     manufacturer: str | None
     model: str
     barcode: str | None
+
+
+class LocationLabelsIn(BaseModel):
+    ids: Annotated[list[int], Field(min_length=1, max_length=500)]
 
 
 class LabelOut(BaseModel):

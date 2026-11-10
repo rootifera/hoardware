@@ -177,8 +177,11 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
               This describes the card&apos;s chip. The card itself (its maker, memory amount and clocks) can differ.
             </p>
           )}
+          {reference.kind === "pci" && (
+            <p className="text-xs text-muted-foreground">This is the PCI ID of the chip on the card; the card&apos;s own maker and model can differ.</p>
+          )}
           <p className="font-mono text-xs text-muted-foreground">
-            {reference.kind === "gpu" ? reference.part_number : (reference.order_code ?? reference.part_number ?? reference.model)}
+            {reference.kind === "gpu" || reference.kind === "pci" ? reference.part_number : (reference.order_code ?? reference.part_number ?? reference.model)}
             {reference.s_spec && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground">S-Spec {reference.s_spec}</span>}
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -191,7 +194,7 @@ function LinkedReference({ item, reference, locked, onUnlink, onConfirm, onChang
           </div>
         </div>
         <div className="flex gap-2">
-          {reference.kind !== "gpu" && item.model !== reference.display_name && (
+          {reference.kind === "cpu" && item.model !== reference.display_name && (
             <Button size="sm" variant="outline" disabled={locked || busy} title={`Rename this item to “${reference.display_name}”`} onClick={onUseName}>
               Use this name
             </Button>

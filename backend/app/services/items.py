@@ -5,17 +5,18 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from fastapi import HTTPException
-from sqlalchemy import Select, String, cast, func, or_, select
+from sqlalchemy import Float, Select, String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.enums import Condition, IdentificationConfidence, TestStatus
+from app.enums import OWNED_STATUSES, Condition, IdentificationConfidence, ItemStatus, TestStatus
 from app.models import Category, Item, Location
 from app.services import appsettings
 
 MAX_TOKENS = 8
 _NUMERIC = re.compile(r"^(?:hw-?)?(\d{1,9})$")
 
-SORTS = ("newest", "name", "category", "location", "position")
+SORTS = ("newest", "name", "category", "location", "position", "spec")
+SPEC_OPS = ("eq", "min", "max")
 
 
 @dataclass
@@ -32,6 +33,12 @@ class ItemFilters:
     never_verified: bool = False
     verified_before: date | None = None  # verified earlier than this, or never
     low_stock: bool = False  # stock items at or under their low-stock level
+    # Empty means what you own (not sold, scrapped, or only wished for).
+    statuses: list[ItemStatus] = field(default_factory=list)
+    # One spec condition: Socket is "Socket 7", or Speed at least / at most "200MHz". Numbers understand units.
+    spec_key: str | None = None
+    spec_op: str = "eq"
+    spec_value: str | None = None
 
 
 def _like_escape(value: str) -> str:
@@ -74,6 +81,21 @@ def apply_filters(session: Session, stmt: Select, f: ItemFilters) -> Select:
     if f.confidences:
         stmt = stmt.where(Item.identification_confidence.in_([c.value for c in f.confidences]))
 
+    wanted_statuses = f.statuses or list(OWNED_STATUSES)
+    if len(wanted_statuses) < len(ItemStatus):
+        stmt = stmt.where(Item.status.in_([x.value for x in wanted_statuses]))
+
+    if f.spec_key and f.spec_value:
+        stored = Item.attributes[f.spec_key].astext
+        if f.spec_op == "eq":
+            stmt = stmt.where(func.lower(stored) == f.spec_value.strip().lower())
+        else:
+            threshold = session.scalar(select(func.hw_spec_number(f.spec_value)))
+            if threshold is None:
+                raise HTTPException(422, f"“{f.spec_value}” does not start with a number")
+            number = func.hw_spec_number(stored)
+            stmt = stmt.where(number >= threshold if f.spec_op == "min" else number <= threshold)
+
     if f.low_stock:
         stmt = stmt.where(Item.is_stock.is_(True), Item.low_stock_level.is_not(None), Item.quantity <= Item.low_stock_level)
 
@@ -96,7 +118,7 @@ def apply_filters(session: Session, stmt: Select, f: ItemFilters) -> Select:
     return stmt
 
 
-def sort_key(sort: str):
+def sort_key(sort: str, spec_key: str | None = None, descending: bool = False):
     """(key expression, descending-by-default) for a sort name."""
     if sort == "newest":
         return Item.id, True
@@ -110,6 +132,11 @@ def sort_key(sort: str):
         # Position first (items without one last), then name: shelf order.
         number = func.lpad(func.coalesce(cast(Item.order, String), "9999999999"), 10, "0")
         return number + " " + Item.sort_name, False
+    if sort == "spec":
+        if not spec_key:
+            raise HTTPException(422, "sorting by a spec needs spec_key")
+        # Items without that spec (or a number in it) go last in either direction.
+        return func.coalesce(func.hw_spec_number(Item.attributes[spec_key].astext, type_=Float), -1e308 if descending else 1e308), False
     raise HTTPException(422, f"unknown sort: {sort}")
 
 
@@ -124,6 +151,8 @@ def cursor_value(sort: str, row) -> object:
     if sort == "position":
         number = row.order if row.order is not None else 9999999999
         return f"{number:010d} {row.sort_name}"
+    if sort == "spec":
+        return row.sort_key
     return row.location_path or ""
 
 

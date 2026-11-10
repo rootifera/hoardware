@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
-from app.enums import Condition, IdentificationConfidence, TestStatus
+from app.enums import GONE_STATUSES, Condition, IdentificationConfidence, ItemStatus, TestStatus
 from app.models import Category, Item, Location, StockLog
 from app.schemas import ImportReport, ImportRowError
 from app.services import locations as location_service
@@ -47,6 +47,10 @@ ALIASES: dict[str, set[str]] = {
     "position": {"position", "order", "slot", "pos"},
     "quantity": {"quantity", "qty", "count", "amount", "number"},
     "barcode": {"barcode", "ean", "upc", "gtin"},
+    "item_status": {"item_status", "lifecycle", "state"},
+    "status_note": {"status_note"},
+    "price": {"price", "price_paid", "cost"},
+    "source": {"source", "bought_from", "supplier", "vendor"},
     "notes": {"notes", "note", "comments", "comment"},
     "acquired_on": {"acquired_on", "acquired", "date_acquired", "purchase_date"},
     "verified_on": {"verified_on", "verified", "last_verified"},
@@ -59,7 +63,7 @@ _NONALNUM = re.compile(r"[^a-z0-9]+")
 
 TEMPLATE_HEADER = [
     "category", "manufacturer", "model", "part_number", "revision", "chipset_manufacturer", "chipset",
-    "condition", "test_status", "test_notes", "location", "position", "quantity", "barcode", "notes", "acquired_on",
+    "condition", "test_status", "test_notes", "location", "position", "quantity", "barcode", "item_status", "status_note", "price", "source", "notes", "acquired_on",
     "verified_on", "identification_confidence", "specs",
 ]
 
@@ -75,6 +79,12 @@ def _enum_lookup(enum) -> dict[str, str]:
 _CONDITIONS = _enum_lookup(Condition)
 _TEST_STATUSES = _enum_lookup(TestStatus)
 _CONFIDENCES = _enum_lookup(IdentificationConfidence)
+# "installed" is not importable: it needs a build to be installed in.
+_ITEM_STATUSES = {
+    **{s.value: s.value for s in ItemStatus if s != ItemStatus.INSTALLED},
+    "in collection": "in_collection",
+    "wishlist": "wanted",
+}
 
 
 @dataclass
@@ -203,6 +213,19 @@ def _validate_row(row: Row) -> None:
         except ValueError:
             row.errors.append(f"verified_on “{v['verified_on']}” is not a date (use YYYY-MM-DD)")
 
+    status = choose("item_status", _ITEM_STATUSES, ItemStatus.IN_COLLECTION.value)
+    price: float | None = None
+    if v.get("price"):
+        try:
+            price = round(float(v["price"].replace(",", "").lstrip("$£€ ")), 2)
+            if not 0 <= price <= 1_000_000_000:
+                raise ValueError
+        except ValueError:
+            row.errors.append(f"price “{v['price']}” must be a number, 0 or more")
+            price = None
+    if len(v.get("source", "")) > 300 or len(v.get("status_note", "")) > 300:
+        row.errors.append("source and status_note must be 300 characters at most")
+
     specs: dict = {}
     if v.get("specs"):
         try:
@@ -241,7 +264,14 @@ def _validate_row(row: Row) -> None:
             if row.location_parts is None:
                 row.errors.append("a position needs a location")
 
+    if status in {s.value for s in GONE_STATUSES}:
+        row.location_parts = None  # sold, scrapped and wishlist items have no place on a shelf
+        row.position = None
     row.fields = {
+        "status": status,
+        "status_note": v.get("status_note") or None,
+        "price": price,
+        "source": v.get("source") or None,
         "model": model,
         "manufacturer": v.get("manufacturer") or None,
         "part_number": v.get("part_number") or None,

@@ -27,6 +27,21 @@ class IdentificationConfidence(StrEnum):
     CONFIRMED = "confirmed"
 
 
+class ItemStatus(StrEnum):
+    IN_COLLECTION = "in_collection"
+    INSTALLED = "installed"  # sits inside another item (a build)
+    LENT = "lent"
+    SOLD = "sold"
+    SCRAPPED = "scrapped"
+    WANTED = "wanted"  # on the wishlist: not owned yet
+
+
+# What counts as "what I have" when no status filter is chosen.
+OWNED_STATUSES = (ItemStatus.IN_COLLECTION, ItemStatus.INSTALLED, ItemStatus.LENT)
+# These have no place on a shelf: their location is cleared.
+GONE_STATUSES = (ItemStatus.SOLD, ItemStatus.SCRAPPED, ItemStatus.WANTED)
+
+
 class PhotoRole(StrEnum):
     FRONT = "front"
     BACK = "back"

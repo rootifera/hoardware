@@ -25,6 +25,10 @@ export function useItemFilters() {
       location: p.get("location") ?? "",
       exact: p.get("exact") === "1",
       unassigned: p.get("unassigned") === "1",
+      specKey: p.get("spec_key") ?? "",
+      specOp: p.get("spec_op") === "min" || p.get("spec_op") === "max" ? (p.get("spec_op") as "min" | "max") : "eq",
+      specValue: p.get("spec_value") ?? "",
+      status: p.get("status") ?? "",
       lowStock: p.get("low_stock") === "1",
       verified: p.get("verified") ?? "",
       sort: sort && (SORTS as readonly string[]).includes(sort) ? sort : "newest",
@@ -46,6 +50,10 @@ export function useItemFilters() {
       set("location", next.location);
       set("exact", next.exact ? "1" : "");
       set("unassigned", next.unassigned ? "1" : "");
+      set("status", next.status);
+      set("spec_key", next.specKey);
+      set("spec_op", next.specOp === "eq" ? "" : next.specOp);
+      set("spec_value", next.specValue);
       set("low_stock", next.lowStock ? "1" : "");
       set("verified", next.verified);
       set("sort", next.sort === EMPTY_FILTERS.sort ? "" : next.sort);

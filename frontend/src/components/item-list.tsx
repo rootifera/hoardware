@@ -13,7 +13,7 @@ import { useQuickAdd } from "@/components/quick-add";
 import { api } from "@/lib/api";
 import { coreLabel, coreShown, valueLabel } from "@/lib/category-config";
 import { cn } from "@/lib/utils";
-import { EMPTY_FILTERS, type Category, type ItemFilters, type ItemSummary } from "@/lib/types";
+import { EMPTY_FILTERS, ITEM_STATUS_LABELS, type Category, type ItemFilters, type ItemSummary } from "@/lib/types";
 
 const ROW_HEIGHT = 76;
 const PAGE_SIZE = 50;
@@ -42,6 +42,16 @@ function Thumb({ item }: { item: ItemSummary }) {
       className="size-14 shrink-0 rounded-md bg-muted object-cover"
       onError={() => setBroken(true)}
     />
+  );
+}
+
+/** Shown for anything that is not simply in the collection: lent, sold, wished for… */
+function StatusTag({ item }: { item: ItemSummary }) {
+  return (
+    <span className="max-w-40 shrink-0 truncate rounded border px-1.5 text-xs text-muted-foreground" title={item.status_note ?? undefined}>
+      {ITEM_STATUS_LABELS[item.status]}
+      {item.status_note ? `: ${item.status_note}` : ""}
+    </span>
   );
 }
 
@@ -100,6 +110,7 @@ function ItemRow({
         <div className="flex items-baseline gap-2">
           <span className="truncate font-medium">{name}</span>
           {item.is_stock && <StockTag item={item} />}
+          {item.status !== "in_collection" && <StatusTag item={item} />}
         </div>
         <div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
           {item.spec_line && <span className="truncate font-medium text-foreground/80">{item.spec_line}</span>}

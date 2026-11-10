@@ -8,6 +8,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { formatBytes, guessKind } from "@/components/file-manager";
 import { coreLabel, coreShown, refKindOf, valueLabel, visibleValues, type CoreKey } from "@/lib/category-config";
+import { ScanIntoField } from "@/components/camera-scanner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { OptionInput } from "@/components/option-input";
 import { SimpleSelect } from "@/components/simple-select";
@@ -205,6 +206,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // The category decides which standard fields this form shows and what they are called.
   const shown = (k: CoreKey) => coreShown(currentCategory, k);
   // "Track as stock": counted items (take out / add). Starts as the category's default; ticking it overrides.
+  // On the wishlist: something to look for, not owned yet (no location).
+  const [wishlist, setWishlist] = useState(false);
   const [stockOverride, setStockOverride] = useState<boolean | null>(preset?.isStock ? true : null);
   const isStock = stockOverride ?? coreShown(currentCategory, "stock");
   const label = (k: CoreKey, fallback: string) => coreLabel(currentCategory, k, fallback);
@@ -216,7 +219,8 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // Nothing in the form changes until a result is picked.
   const refKind = refKindOf(categoryName);
   const sources = useQuery({ queryKey: ["reference-sources"], queryFn: api.referenceSources, staleTime: 60_000 });
-  const hasDataset = (sources.data ?? []).some((x) => x.models > 0);
+  const SOURCE_KIND: Record<string, string> = { "cpu-db": "cpu", "gpus-specs": "gpu", "pci-ids": "pci" };
+  const hasDataset = (sources.data ?? []).some((x) => x.models > 0 && SOURCE_KIND[x.key] === refKind);
   const lookupAvailable = refKind !== null && hasDataset;
   const typed = useDebouncedValue(lookupText.trim(), 250);
   const wantsResults = lookupAvailable && match === null && typed.length >= 2 && lookupText.trim().length >= 2;
@@ -262,7 +266,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     // A CPU's maker is the record's.
     if (r.manufacturer && (r.kind === "cpu" || manufacturer.trim() === "")) setManufacturer(r.manufacturer);
     // The part number is the order code (or a graphics board number); the S-Spec is saved as its own spec.
-    if (r.part_number && (r.kind === "cpu" ? partNumber.trim() === "" || partNumber.trim().toLowerCase() === was : partNumber.trim() === "")) {
+    if (r.kind !== "pci" && r.part_number && (r.kind === "cpu" ? partNumber.trim() === "" || partNumber.trim().toLowerCase() === was : partNumber.trim() === "")) {
       setPartNumber(r.order_code ?? r.part_number);
     }
     if (r.kind === "cpu") {
@@ -304,6 +308,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         test_status: testStatus,
         notes: notes.trim() || null,
         ...(barcode.trim() ? { barcode: barcode.trim() } : {}),
+        ...(wishlist ? { status: "wanted" as const } : {}),
         ...(isStock ? { is_stock: true, quantity: Number(quantity.trim() === "" ? "1" : quantity) } : {}),
       };
       if (isStock && (!Number.isInteger(fields.quantity) || (fields.quantity ?? 0) < 0)) {
@@ -311,7 +316,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         return setError(`${label("stock", "Quantity")} must be a whole number, 0 or more.`);
       }
       // A position is the item's exact spot inside the location.
-      const start = position.trim() === "" ? null : Number(position);
+      const start = wishlist || position.trim() === "" ? null : Number(position);
       if (start !== null && (!Number.isInteger(start) || start < 0)) {
         setSaving(false);
         return setError("Position must be a whole number, 0 or more.");
@@ -322,16 +327,16 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       }
       // Several items are separate records (own code, condition, test status),
       // at consecutive positions when a start position is given.
-      const matched = match ? { reference_model_id: match.id, identification_confidence: "confirmed" as const } : {};
+      const matched = match ? { reference_model_id: match.id, identification_confidence: "candidate" as const } : {};
       const batch =
         copies > 1
           ? await api.createItemsBatch({
-              item: { ...fields, ...matched, location_id: location?.id ?? null },
+              item: { ...fields, ...matched, location_id: wishlist ? null : (location?.id ?? null) },
               copies,
               order_start: start,
             })
           : null;
-      const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: location?.id ?? null, order: start });
+      const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: wishlist ? null : (location?.id ?? null), order: start });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ category: effectiveCategory, location } satisfies Remembered));
       // The item is saved either way. A failed upload must not go unnoticed, so it gets its own
       // lasting message saying what failed and why.
@@ -411,7 +416,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
     }
   }
 
-  const sourceName = refKind === "gpu" ? "graphics chip database" : "CPU database";
+  const sourceName = refKind === "gpu" ? "graphics chip database" : refKind === "pci" ? "PCI ID list" : "CPU database";
   const results_ = listOpen && (
     <div
       role="group"
@@ -419,7 +424,11 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       className="absolute top-full right-0 left-0 z-50 mt-1 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
     >
       <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">
-        {refKind === "gpu" ? "Pick the chip: it fills in the chipset and its specs. Your card's own name stays as typed." : "Pick one to fill in the maker, name and specs."}
+        {refKind === "gpu"
+          ? "Pick the chip: it fills in the chipset and its specs. Your card's own name stays as typed."
+          : refKind === "pci"
+            ? "Pick the chip: it adds its PCI ID. Your card's own name stays as typed."
+            : "Pick one to fill in the maker, name and specs."}
       </p>
       <div className="max-h-64 overflow-y-auto p-1">
         {offered.map((c) => (
@@ -434,7 +443,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
                 {[c.reference.manufacturer, c.reference.display_name].filter(Boolean).join(" ")}
               </span>
               <span className="flex shrink-0 items-center gap-2 font-mono text-xs text-muted-foreground">
-                {c.reference.kind === "gpu" ? c.reference.part_number : (c.reference.order_code ?? c.reference.part_number ?? c.reference.model)}
+                {c.reference.kind === "gpu" || c.reference.kind === "pci" ? c.reference.part_number : (c.reference.order_code ?? c.reference.part_number ?? c.reference.model)}
                 {c.reference.s_spec && (
                   <span className="rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground" title="S-Spec: the code printed on the chip">
                     {c.reference.s_spec}
@@ -540,7 +549,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
                 className="h-9"
                 autoComplete="off"
                 placeholder={
-                  refKind === "gpu" ? "Chip or card name, e.g. TNT2 Ultra, Voodoo3 3000, Rage Pro" : "S-Spec, part number or name, e.g. SL32A, Celeron 300A"
+                  refKind === "gpu" ? "Chip or card name, e.g. TNT2 Ultra, Voodoo3 3000, Rage Pro" : refKind === "pci" ? "PCI ID or chip name, e.g. 1102:0002, EMU10k1, RTL8139" : "S-Spec, part number or name, e.g. SL32A, Celeron 300A"
                 }
                 value={lookupText}
                 onChange={(e) => setLookupText(e.target.value)}
@@ -553,7 +562,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
               ? "Its specs are filled in below and saved with the item. Everything stays editable."
               : noResults
                 ? "Nothing found. You can fill the details in by hand."
-                : refKind === "gpu"
+                : refKind === "gpu" || refKind === "pci"
                   ? "Finds the chip on the card and fills its specs. Nothing changes until you pick a result."
                   : "Fills in the maker, name and specs. Nothing changes until you pick a result."}
           </p>
@@ -660,7 +669,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           )}
         </div>
       )}
-      <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
+      <div className={`grid gap-4 sm:grid-cols-[1fr_10rem]${wishlist ? " hidden" : ""}`}>
         <div className="grid gap-1.5">
           <Label htmlFor="qa-location">Location</Label>
           <LocationPicker
@@ -705,6 +714,10 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             }}
           />
           Track as stock
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 text-sm" title="Something you are looking for: it is listed under Wishlist, with no location">
+          <input type="checkbox" className="size-4 accent-primary" checked={wishlist} onChange={(e) => setWishlist(e.target.checked)} />
+          On my wishlist (not owned yet)
         </label>
         {/* A stock item is one record that says "100 of them", so several separate items is not offered. */}
         {!isStock &&
@@ -815,17 +828,20 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       {shown("barcode") && (showBarcode || barcode) && (
         <div className="grid gap-1.5">
           <Label htmlFor="qa-barcode">{label("barcode", "Barcode")}</Label>
-          <Input
-            id="qa-barcode"
-            autoComplete="off"
-            autoFocus={showBarcode && !barcode}
-            placeholder="Scan or type the barcode from the packaging"
-            maxLength={100}
-            value={barcode}
-            onChange={(e) => setBarcode(e.target.value)}
-            // A scanner ends the code with Enter: that must not save the item.
-            onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-          />
+          <div className="flex gap-2">
+            <Input
+              id="qa-barcode"
+              autoComplete="off"
+              autoFocus={showBarcode && !barcode}
+              placeholder="Scan or type the barcode from the packaging"
+              maxLength={100}
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              // A scanner ends the code with Enter: that must not save the item.
+              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+            />
+            <ScanIntoField onResult={(text) => setBarcode(text.slice(0, 100))} />
+          </div>
           <p className="text-xs text-muted-foreground">Optional. Without one, labels and scans use the item&apos;s own code.</p>
         </div>
       )}

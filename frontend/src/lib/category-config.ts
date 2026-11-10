@@ -46,9 +46,11 @@ export function visibleValues<T extends string>(category: Category | undefined |
 }
 
 /** The kind of reference database that describes a category, if there is one (CPUs, graphics cards). */
-export function refKindOf(categoryName: string): "cpu" | "gpu" | null {
+export function refKindOf(categoryName: string): "cpu" | "gpu" | "pci" | null {
   if (/cpu|processor/i.test(categoryName)) return "cpu";
   if (/gpu|vga|graphics|video/i.test(categoryName)) return "gpu";
+  // Expansion cards with PCI IDs (sound, network, controllers). ISA and older cards have none.
+  if (/sound|audio|network|ethernet|\blan\b|nic\b|scsi|raid|usb|modem|capture|tuner|controller|pci/i.test(categoryName)) return "pci";
   return null;
 }
 
