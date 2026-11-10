@@ -143,3 +143,19 @@ def test_location_pagination(client, make_location):
         if not cursor:
             break
     assert names == [f"loc {i}" for i in range(7)]
+
+
+def test_location_labels_and_scanning_a_box(client, make_location, make_item):
+    shelf = make_location("Shelf 2")
+    box = make_location("Box 3", shelf["id"], type="Box")
+    make_item("In the box", location_id=box["id"])
+    labels = client.post("/api/v1/locations/labels", json={"ids": [box["id"], shelf["id"]]}).json()
+    by_name = {label["model"]: label for label in labels}
+    assert by_name["Box 3"]["barcode"] == f"LOC-{box['id']:06d}" and by_name["Box 3"]["category_name"] == "Box"
+    assert by_name["Box 3"]["location_path"] == "Shelf 2" and by_name["Shelf 2"]["location_path"] is None
+    # the code on the label finds the location again, in any case
+    found = client.get(f"/api/v1/locations/by-code/{by_name['Box 3']['barcode'].lower()}")
+    assert found.status_code == 200 and found.json()["id"] == box["id"]
+    assert client.get("/api/v1/locations/by-code/LOC-999999").status_code == 404
+    assert client.get("/api/v1/locations/by-code/HW-000001").status_code == 404
+    assert client.post("/api/v1/locations/labels", json={"ids": []}).status_code == 422

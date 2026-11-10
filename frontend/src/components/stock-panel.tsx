@@ -1,10 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Minus, Plus } from "lucide-react";
+import { Loader2, Minus, Plus, Split } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { ItemDetail } from "@/lib/types";
@@ -18,6 +20,10 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
   const [amount, setAmount] = useState("1");
   const [note, setNote] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const router = useRouter();
+  const [splitting, setSplitting] = useState(false);
+  const [splitAmount, setSplitAmount] = useState("");
+  const [splitTo, setSplitTo] = useState<PickedLocation | null>(null);
   const history = useQuery({ queryKey: ["stock-log", item.id], queryFn: () => api.stockLog(item.id) });
 
   const change = useMutation({
@@ -31,6 +37,22 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const split = useMutation({
+    mutationFn: () => api.splitStock(item.id, { quantity: Number(splitAmount), location_id: splitTo?.id ?? null }),
+    onSuccess: (created) => {
+      toast.success(`Moved ${Number(splitAmount).toLocaleString()} to ${splitTo?.full_name ?? "no location"} as ${created.inventory_code}`);
+      setSplitting(false);
+      setSplitAmount("");
+      queryClient.invalidateQueries({ queryKey: ["item", item.id] });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["stock-log", item.id] });
+      router.push(`/items/${created.id}`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const splitN = Number(splitAmount);
+  const splitValid = Number.isInteger(splitN) && splitN > 0 && splitN < item.quantity && splitTo !== null && splitTo.id !== item.location_id;
 
   const n = Number(amount);
   const valid = Number.isInteger(n) && n > 0;
@@ -86,6 +108,43 @@ export function StockPanel({ item, label, locked }: { item: ItemDetail; label: s
         </Button>
       </form>
       {locked && <p className="mt-2 text-xs text-muted-foreground">You have unsaved changes on this page. Save or revert them first.</p>}
+
+      {item.quantity > 1 && (
+        <div className="mt-4">
+          {!splitting ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSplitting(true)}>
+              <Split /> Some of these are somewhere else…
+            </Button>
+          ) : (
+            <form
+              aria-label="Move part of the stock"
+              className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto_auto] sm:items-end"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (splitValid && !locked) split.mutate();
+              }}
+            >
+              <div className="grid gap-1">
+                <label htmlFor="split-amount" className="text-xs text-muted-foreground">
+                  How many
+                </label>
+                <Input id="split-amount" type="number" min={1} max={item.quantity - 1} inputMode="numeric" value={splitAmount} onChange={(e) => setSplitAmount(e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <span className="text-xs text-muted-foreground">Move them to</span>
+                <LocationPicker value={splitTo} onChange={setSplitTo} placeholder="Choose a location" />
+              </div>
+              <Button type="submit" disabled={!splitValid || locked || split.isPending}>
+                {split.isPending ? <Loader2 className="animate-spin" /> : <Split />} Move
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setSplitting(false)}>
+                Cancel
+              </Button>
+              <p className="text-xs text-muted-foreground sm:col-span-4">They become their own record with its own code, so each location shows its own count.</p>
+            </form>
+          )}
+        </div>
+      )}
 
       {history.data && history.data.length > 0 && (
         <div className="mt-5">

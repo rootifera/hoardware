@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCheck, Download, Loader2, MapPinned, NotebookPen, Printer, Trash2, X } from "lucide-react";
+import { CheckCheck, Download, Loader2, MapPinned, NotebookPen, Printer, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -26,11 +26,17 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { SimpleSelect } from "@/components/simple-select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, daysAgo } from "@/lib/api";
 import {
   CONDITIONS,
+  ITEM_STATUSES,
+  ITEM_STATUS_LABELS,
+  SETTABLE_STATUSES,
   TEST_STATUSES,
+  type ItemStatus,
   type BulkChanges,
   type BulkFilter,
   type BulkSelection,
@@ -54,6 +60,10 @@ export function toBulkFilter(f: ItemFilters): BulkFilter {
     include_descendants: !f.exact,
     unassigned: f.unassigned,
     low_stock: f.lowStock,
+    spec_key: f.specKey || null,
+    spec_op: f.specOp,
+    spec_value: f.specKey && f.specValue.trim() ? f.specValue.trim() : null,
+    status: f.status === "all" ? [...ITEM_STATUSES] : f.status ? [f.status] : [],
     never_verified: f.verified === "never",
     verified_before: f.verified && f.verified !== "never" ? daysAgo(Number(f.verified)) : null,
   };
@@ -225,6 +235,67 @@ function NotesDialog({ open, onClose, onApply }: { open: boolean; onClose: () =>
   );
 }
 
+/** Set the status (lent, sold, wishlist…) of the selected items, with an optional note. */
+function StatusDialog({ open, onClose, onApply }: { open: boolean; onClose: () => void; onApply: (status: ItemStatus, note: string | null) => void }) {
+  const [status, setStatus] = useState<ItemStatus>("lent");
+  const [note, setNote] = useState("");
+  const noted = status !== "in_collection";
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Set status</DialogTitle>
+          <DialogDescription>Sold, scrapped and wishlist items are taken off their shelf; the history remembers where they were.</DialogDescription>
+        </DialogHeader>
+        {open && (
+          <div className="grid gap-3">
+            <SimpleSelect
+              aria-label="Status"
+              value={status}
+              onChange={(v) => setStatus(v as ItemStatus)}
+              options={SETTABLE_STATUSES.map((s) => ({ value: s, label: ITEM_STATUS_LABELS[s] }))}
+            />
+            {noted && <Input aria-label="Note" maxLength={300} placeholder="Note, e.g. who has them (optional)" value={note} onChange={(e) => setNote(e.target.value)} />}
+          </div>
+        )}
+        <DialogFooter>
+          <Button onClick={() => onApply(status, noted ? note.trim() || null : null)}>Set status</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Set (or remove) one spec on the selected items, e.g. Socket = Socket 7 on forty CPUs. */
+function SpecDialog({ open, onClose, onApply }: { open: boolean; onClose: () => void; onApply: (key: string, value: string | null) => void }) {
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Set a spec</DialogTitle>
+          <DialogDescription>Sets one specification (such as Socket or Capacity) on every selected item, replacing its old value.</DialogDescription>
+        </DialogHeader>
+        {open && (
+          <div className="grid gap-3">
+            <Input aria-label="Spec name" maxLength={100} placeholder="Spec name, e.g. Socket" value={key} onChange={(e) => setKey(e.target.value)} />
+            <Input aria-label="Spec value" maxLength={300} placeholder="Value, e.g. Socket 7" value={value} onChange={(e) => setValue(e.target.value)} />
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" disabled={!key.trim()} onClick={() => onApply(key.trim(), null)}>
+            Remove this spec
+          </Button>
+          <Button disabled={!key.trim() || !value.trim()} onClick={() => onApply(key.trim(), value.trim())}>
+            Set spec
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const CONFIRM_ABOVE = 25;
 
 /** Floating bar shown while items are selected. */
@@ -241,6 +312,8 @@ export function BulkBar({
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories, staleTime: 60_000 });
   const [moving, setMoving] = useState(false);
   const [notes, setNotes] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [specOpen, setSpecOpen] = useState(false);
   const [pending, setPending] = useState<{ label: string; changes: BulkChanges } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const router = useRouter();
@@ -263,6 +336,8 @@ export function BulkBar({
       toast.success(`Updated ${plural(r.matched)}`);
       setPending(null);
       setNotes(false);
+      setStatusOpen(false);
+      setSpecOpen(false);
     },
     onError: (e) => {
       setPending(null);
@@ -332,6 +407,12 @@ export function BulkBar({
         <Button variant="outline" size="sm" disabled={apply.isPending} onClick={() => setNotes(true)}>
           <NotebookPen /> Notes
         </Button>
+        <Button variant="outline" size="sm" disabled={apply.isPending} onClick={() => setStatusOpen(true)}>
+          Status…
+        </Button>
+        <Button variant="outline" size="sm" disabled={apply.isPending} onClick={() => setSpecOpen(true)}>
+          <SlidersHorizontal /> Spec…
+        </Button>
         <Button variant="outline" size="sm" disabled={apply.isPending} onClick={() => setMoving(true)}>
           <MapPinned /> Move…
         </Button>
@@ -369,6 +450,16 @@ export function BulkBar({
         }}
       />
       <MoveDialog open={moving} onClose={() => setMoving(false)} selection={selection} count={count} onDone={onClear} />
+      <StatusDialog
+        open={statusOpen}
+        onClose={() => setStatusOpen(false)}
+        onApply={(status, note) => request(`status “${ITEM_STATUS_LABELS[status]}”`, { status, status_note: note })}
+      />
+      <SpecDialog
+        open={specOpen}
+        onClose={() => setSpecOpen(false)}
+        onApply={(key, value) => request(value === null ? `remove the spec “${key}”` : `spec “${key}” = “${value}”`, { attributes: { [key]: value } })}
+      />
       <NotesDialog
         open={notes}
         onClose={() => setNotes(false)}

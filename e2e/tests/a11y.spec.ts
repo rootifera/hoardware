@@ -67,6 +67,42 @@ test.describe("accessibility", () => {
     await audit(page, "stock panel, none left");
   });
 
+  test("lifecycle: status tags, the Where it is now panel, a build with parts, and the bulk dialogs", async ({ page, request }) => {
+    const cats = await (await request.get("/api/v1/categories")).json();
+    const model = `A11y life ${RUN}`;
+    const build = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} build` } })).json();
+    const part = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} part`, installed_in_id: build.id } })).json();
+    const lent = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${model} lent`, } })).json();
+    await request.patch(`/api/v1/items/${lent.id}`, { data: { status: "lent", status_note: "Sam" } });
+    itemIds.push(part.id, lent.id, build.id);
+    await page.goto(`/?q=${encodeURIComponent(model)}`);
+    await expect(page.getByText("Lent out: Sam")).toBeVisible();
+    await expect(page.getByText("Installed in a build")).toBeVisible();
+    await audit(page, "inventory list with status tags");
+    await page.goto(`/items/${build.id}`);
+    await expect(page.getByRole("list", { name: "Parts installed" })).toBeVisible();
+    await audit(page, "a build with its parts");
+    await page.goto(`/items/${lent.id}`);
+    await expect(page.getByRole("list", { name: "Item history" })).toBeVisible();
+    await audit(page, "an item with history");
+    await page.goto(`/?q=${encodeURIComponent(model)}`);
+    await page.getByRole("checkbox", { name: /^Select HW-/ }).first().click();
+    const bar = page.getByRole("region", { name: "Bulk actions" });
+    await bar.getByRole("button", { name: "Status…" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await audit(page, "the bulk status dialog");
+    await page.keyboard.press("Escape");
+    await bar.getByRole("button", { name: "Spec…" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await audit(page, "the bulk spec dialog");
+  });
+
+  test("location label page", async ({ page }) => {
+    await page.goto(`/labels?locations=${boxId}`);
+    await expect(page.getByTestId("label")).toHaveCount(1);
+    await audit(page, "location label");
+  });
+
   test("inventory list, with the bulk bar", async ({ page }) => {
     await page.goto(`/?q=${encodeURIComponent(`a11y cpu ${RUN}`)}`);
     await expect(page.getByRole("checkbox", { name: /^Select HW-/ })).toHaveCount(3);

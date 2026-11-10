@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { LocationPicker, type PickedLocation } from "@/components/location-picker";
 import { FileManager } from "@/components/file-manager";
 import { OptionInput } from "@/components/option-input";
+import { ScanIntoField } from "@/components/camera-scanner";
+import { LifecyclePanel } from "@/components/lifecycle-panel";
 import { StockPanel } from "@/components/stock-panel";
 import { PhotoManager } from "@/components/photo-manager";
 import { useQuickAdd } from "@/components/quick-add";
@@ -71,6 +73,8 @@ interface Draft {
   low_stock_level: string; // "" = no warning
   notes: string;
   acquired_on: string;
+  price: string; // "" = none
+  source: string;
   verified_on: string;
   identification_confidence: Confidence;
   specs: SpecRow[];
@@ -109,6 +113,8 @@ function toDraft(item: Item): Draft {
     low_stock_level: item.low_stock_level !== null ? String(item.low_stock_level) : "",
     notes: text(item.notes),
     acquired_on: text(item.acquired_on),
+    price: item.price !== null ? String(item.price) : "",
+    source: text(item.source),
     verified_on: text(item.verified_on),
     identification_confidence: item.identification_confidence,
     specs: Object.entries(item.attributes).map(([key, value]) => ({ key, value: asText(value) })),
@@ -153,6 +159,9 @@ function diff(item: Item, d: Draft): ItemUpdate {
   const level = d.low_stock_level.trim() === "" ? null : Number(d.low_stock_level);
   if ((level === null || (Number.isInteger(level) && level >= 0)) && level !== item.low_stock_level) patch.low_stock_level = level;
   if (nullable(d.notes) !== item.notes) patch.notes = nullable(d.notes);
+  const price = d.price.trim() === "" ? null : Number(d.price);
+  if ((price === null || (Number.isFinite(price) && price >= 0)) && price !== item.price) patch.price = price;
+  if (nullable(d.source) !== item.source) patch.source = nullable(d.source);
   if ((d.acquired_on || null) !== item.acquired_on) patch.acquired_on = d.acquired_on || null;
   if ((d.verified_on || null) !== item.verified_on) patch.verified_on = d.verified_on || null;
   if (d.identification_confidence !== item.identification_confidence) patch.identification_confidence = d.identification_confidence;
@@ -401,6 +410,7 @@ function ItemEditor({ item }: { item: Item }) {
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="grid min-w-0 content-start gap-6">
+          <LifecyclePanel item={item} locked={dirty} />
           {item.is_stock && <StockPanel item={item} label={label("stock", "in stock")} locked={dirty} />}
           <form
             className="grid gap-6"
@@ -439,14 +449,17 @@ function ItemEditor({ item }: { item: Item }) {
                     htmlFor="f-barcode"
                     hint={`The original barcode from the packaging, if it has one. Empty: labels and scans use the item's own code (${item.inventory_code}).`}
                   >
-                    <Input
-                      id="f-barcode"
-                      maxLength={100}
-                      value={draft.barcode}
-                      onChange={(e) => set("barcode", e.target.value)}
-                      // A scanner ends the code with Enter: that must not save the item.
-                      onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="f-barcode"
+                        maxLength={100}
+                        value={draft.barcode}
+                        onChange={(e) => set("barcode", e.target.value)}
+                        // A scanner ends the code with Enter: that must not save the item.
+                        onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+                      />
+                      <ScanIntoField onResult={(text) => set("barcode", text.slice(0, 100))} />
+                    </div>
                   </Field>
                 )}
                 {shown("confidence") && (
@@ -662,6 +675,16 @@ function ItemEditor({ item }: { item: Item }) {
                 {shown("acquired_on") && (
                   <Field label={label("acquired_on", "Acquired on")} htmlFor="f-acq">
                     <Input id="f-acq" type="date" value={draft.acquired_on} onChange={(e) => set("acquired_on", e.target.value)} />
+                  </Field>
+                )}
+                {shown("acquired_on") && (
+                  <Field label="Price paid" htmlFor="f-price">
+                    <Input id="f-price" type="number" min={0} step="0.01" inputMode="decimal" value={draft.price} onChange={(e) => set("price", e.target.value)} />
+                  </Field>
+                )}
+                {shown("acquired_on") && (
+                  <Field label="Bought from" htmlFor="f-source">
+                    <Input id="f-source" maxLength={300} placeholder="Shop, eBay, a friend…" value={draft.source} onChange={(e) => set("source", e.target.value)} />
                   </Field>
                 )}
                 {shown("verified_on") && (

@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
 import { looksLikeScan, noteKey } from "@/lib/scan";
+import { resolveScan } from "@/lib/scan-open";
 
 const MAX_GAP_MS = 60; // a scanner types faster than this between keys; a person does not
 
@@ -30,19 +30,11 @@ export function ScanListener() {
         buffer = "";
         if (code.length >= 5 && fast && looksLikeScan(code)) {
           e.preventDefault();
-          api
-            .scanLookup(code)
-            .then((found) => {
-              if (found.length === 1) {
-                toast.success(`Found ${found[0].inventory_code}`);
-                router.push(`/items/${found[0].id}`);
-              } else if (found.length > 1) {
-                // Identical boxed items share a barcode: show them all instead of picking one.
-                toast.success(`${found.length} items have this barcode`);
-                router.push(`/?q=${encodeURIComponent(code)}`);
-              } else {
-                toast.error(`No item has the code ${code.toUpperCase()}`);
-              }
+          resolveScan(code)
+            .then((r) => {
+              if (r.kind === "none") return toast.error(r.message);
+              toast.success(r.message);
+              router.push(r.href);
             })
             .catch(() => toast.error("The scan could not be looked up"));
         }

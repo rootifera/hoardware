@@ -1,3 +1,34 @@
+export const ITEM_STATUSES = ["in_collection", "installed", "lent", "sold", "scrapped", "wanted"] as const;
+export type ItemStatus = (typeof ITEM_STATUSES)[number];
+export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
+  in_collection: "In collection",
+  installed: "Installed in a build",
+  lent: "Lent out",
+  sold: "Sold",
+  scrapped: "Scrapped",
+  wanted: "Wishlist",
+};
+/** What you can set on the item page. "Installed" comes from choosing a build. */
+export const SETTABLE_STATUSES: ItemStatus[] = ["in_collection", "lent", "sold", "scrapped", "wanted"];
+/** Sold, scrapped and wished-for items have no place on a shelf. */
+export const GONE_STATUSES: ItemStatus[] = ["sold", "scrapped", "wanted"];
+
+export interface ItemRef {
+  id: number;
+  inventory_code: string;
+  manufacturer: string | null;
+  model: string;
+  category_name: string | null;
+}
+
+export interface ItemHistoryEntry {
+  id: number;
+  kind: "location" | "status" | "installed_in";
+  old: string | null;
+  new: string | null;
+  created_at: string;
+}
+
 export const CONDITIONS = ["Unknown", "New / Sealed", "Excellent", "Good", "Fair", "Poor", "Damaged"] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
@@ -130,6 +161,8 @@ export interface ItemSummary {
   low_stock_level: number | null;
   /** The original barcode (from the packaging), if any. Labels and scans use it, else the item's own code. */
   barcode: string | null;
+  status: ItemStatus;
+  status_note: string | null;
   thumbnail_url: string | null;
   /** Key specs of the matched reference model, if any. */
   spec_line: string | null;
@@ -191,6 +224,12 @@ export interface ReferenceCandidate {
 }
 
 export interface ItemDetail extends ItemSummary {
+  installed_in_id: number | null;
+  installed_in: ItemRef | null;
+  /** What is installed in this item (when it is a build). */
+  parts: ItemRef[];
+  price: number | null;
+  source: string | null;
   test_notes: string | null;
   notes: string | null;
   acquired_on: string | null;
@@ -222,6 +261,11 @@ export interface ItemCreate {
   is_stock?: boolean;
   quantity?: number;
   barcode?: string | null;
+  status?: ItemStatus;
+  status_note?: string | null;
+  installed_in_id?: number | null;
+  price?: number | null;
+  source?: string | null;
   notes?: string | null;
   /** Set when a reference suggestion was picked. */
   reference_model_id?: number | null;
@@ -247,6 +291,11 @@ export type ItemUpdate = Partial<
     | "quantity"
     | "low_stock_level"
     | "barcode"
+    | "status"
+    | "status_note"
+    | "installed_in_id"
+    | "price"
+    | "source"
     | "notes"
     | "acquired_on"
     | "verified_on"
@@ -255,7 +304,7 @@ export type ItemUpdate = Partial<
   >
 >;
 
-export const SORTS = ["newest", "name", "category", "location", "position"] as const;
+export const SORTS = ["newest", "name", "category", "location", "position", "spec"] as const;
 export type Sort = (typeof SORTS)[number];
 
 export interface ItemFilters {
@@ -268,6 +317,12 @@ export interface ItemFilters {
   location: string; // location id, "" = any
   exact: boolean; // true = do not include descendant locations
   unassigned: boolean;
+  /** One spec condition, e.g. Speed at least 200MHz. Numbers understand units. */
+  specKey: string;
+  specOp: "eq" | "min" | "max";
+  specValue: string;
+  /** "" = what you own, a status, or "all". */
+  status: string;
   /** Stock items at or under their low-stock level. */
   lowStock: boolean;
   /** Stock-take: "" any, "never", or a number of days (not seen within that many). */
@@ -286,6 +341,10 @@ export const EMPTY_FILTERS: ItemFilters = {
   location: "",
   exact: false,
   unassigned: false,
+  specKey: "",
+  specOp: "eq",
+  specValue: "",
+  status: "",
   lowStock: false,
   verified: "",
   sort: "newest",
@@ -307,6 +366,10 @@ export interface BulkFilter {
   include_descendants: boolean;
   unassigned: boolean;
   low_stock: boolean;
+  status: string[];
+  spec_key: string | null;
+  spec_op: "eq" | "min" | "max";
+  spec_value: string | null;
   never_verified: boolean;
   verified_before: string | null;
 }
@@ -325,6 +388,12 @@ export interface BulkChanges {
   location_id?: number | null;
   /** true = seen in place today; false = clear. */
   verified?: boolean;
+  status?: ItemStatus;
+  status_note?: string | null;
+  source?: string | null;
+  price?: number | null;
+  /** Spec values to set; null removes the spec. */
+  attributes?: Record<string, string | number | null>;
 }
 
 export type PositionMode = "clear" | "keep" | "append";

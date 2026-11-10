@@ -36,6 +36,8 @@ function selectionFromUrl(params: URLSearchParams): BulkSelection | null {
 
 function Labels() {
   const params = useSearchParams();
+  // ?locations=1,2 prints labels for boxes and shelves instead of items: scanning one opens its contents.
+  const locationIds = (params.get("locations") ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500);
   const [selection, setSelection] = useState<BulkSelection | null | undefined>(undefined);
   const [layout, setLayout] = useState<LayoutKey>("sheet");
   // The selection and the chosen label size live in the browser's storage, which the server render cannot read.
@@ -48,9 +50,9 @@ function Labels() {
   }, [params]);
 
   const labels = useQuery({
-    queryKey: ["labels", JSON.stringify(selection)],
-    queryFn: () => api.labels(selection!),
-    enabled: !!selection,
+    queryKey: ["labels", locationIds.length ? locationIds : JSON.stringify(selection)],
+    queryFn: () => (locationIds.length ? api.locationLabels(locationIds) : api.labels(selection!)),
+    enabled: locationIds.length > 0 || !!selection,
   });
   const l = LAYOUTS[layout];
 
@@ -78,11 +80,11 @@ function Labels() {
           <Printer /> Print {labels.data ? `${labels.data.length} label${labels.data.length === 1 ? "" : "s"}` : ""}
         </Button>
         <p className="text-sm text-muted-foreground">
-          Choose &quot;Actual size&quot; (100%) in the print dialog and turn off headers and footers. Each barcode is the item&apos;s code: scanning it opens the item.
+          Choose &quot;Actual size&quot; (100%) in the print dialog and turn off headers and footers. Scanning a label opens the item (or, for a box or shelf label, what is inside it).
         </p>
       </div>
 
-      {selection === null && <p className="text-sm text-muted-foreground">Nothing to print. Select items in the inventory and choose Print labels.</p>}
+      {selection === null && locationIds.length === 0 && <p className="text-sm text-muted-foreground">Nothing to print. Select items in the inventory and choose Print labels.</p>}
       {labels.isError && <p className="text-sm text-destructive">{labels.error.message}</p>}
       {labels.data && (
         <div

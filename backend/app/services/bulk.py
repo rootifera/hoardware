@@ -6,14 +6,18 @@ one transaction. Ids are passed as a single array parameter rather than one
 parameter each, so selecting tens of thousands of items stays cheap.
 """
 
+import json
+
 from fastapi import HTTPException
 from sqlalchemy import BigInteger, any_, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
+from app.enums import GONE_STATUSES
 from app.models import Category, Item, ItemFile, Location, Photo
 from app.schemas import BulkDeleteIn, BulkDeleteOut, BulkFilter, BulkIn, BulkOut, BulkSelection
 from app.services import items as item_service
+from app.services import lifecycle
 from app.services import locations as location_service
 from app.services.items import ItemFilters
 from app.services.photos import process_pending_deletions, queue_deletions
@@ -36,6 +40,10 @@ def _filters(f: BulkFilter) -> ItemFilters:
         never_verified=f.never_verified,
         verified_before=f.verified_before,
         low_stock=f.low_stock,
+        statuses=f.status,
+        spec_key=f.spec_key,
+        spec_op=f.spec_op,
+        spec_value=f.spec_value.strip() if f.spec_value else None,
     )
 
 
@@ -84,6 +92,7 @@ def delete_bulk(session: Session, body: BulkDeleteIn) -> BulkDeleteOut:
     keys += session.scalars(select(Photo.thumb_key).where(Photo.item_id == any_(_ids_param(ids))))
     keys += session.scalars(select(ItemFile.storage_key).where(ItemFile.item_id == any_(_ids_param(ids))))
     queue_deletions(session, keys)
+    lifecycle.release_parts(session, ids)
     deleted = session.execute(
         text("DELETE FROM items WHERE id = ANY(:ids)").bindparams(_ids_param(ids))
     ).rowcount
@@ -105,6 +114,8 @@ def apply_bulk(session: Session, body: BulkIn) -> BulkOut:
         raise HTTPException(422, "no changes given")
     if "category_id" in changes and session.get(Category, changes["category_id"]) is None:
         raise HTTPException(422, "category does not exist")
+    if changes.get("status") in GONE_STATUSES:
+        changes["location_id"] = None  # sold, scrapped and wished-for items have no place on a shelf
     destination = changes.get("location_id")
     if "location_id" in changes and destination is not None and session.get(Location, destination) is None:
         raise HTTPException(422, "location does not exist")
@@ -144,6 +155,32 @@ def apply_bulk(session: Session, body: BulkIn) -> BulkOut:
         session.rollback()
         return result
 
+    # 0a) lifecycle history, written while the old values are still in place
+    if "status" in changes:
+        new_status = changes["status"].value
+        session.execute(
+            text(
+                "INSERT INTO item_history (item_id, kind, old, new) SELECT i.id, 'installed_in',"
+                " p.inventory_code || ' ' || concat_ws(' ', p.manufacturer, p.model), NULL"
+                " FROM items i JOIN items p ON p.id = i.installed_in_id WHERE i.id = ANY(:ids)"
+            ).bindparams(_ids_param(ids))
+        )
+        session.execute(
+            text(
+                "INSERT INTO item_history (item_id, kind, old, new) SELECT id, 'status', status, :s"
+                " FROM items WHERE id = ANY(:ids) AND status <> :s"
+            ).bindparams(_ids_param(ids), s=new_status)
+        )
+    if moves:
+        dest_name = session.scalar(select(Location.full_name).where(Location.id == destination)) if destination else None
+        session.execute(
+            text(
+                "INSERT INTO item_history (item_id, kind, old, new) SELECT i.id, 'location', l.full_name, :name"
+                " FROM items i LEFT JOIN locations l ON l.id = i.location_id"
+                " WHERE i.id = ANY(:ids) AND i.location_id IS DISTINCT FROM :dest"
+            ).bindparams(_ids_param(ids), name=dest_name, dest=destination)
+        )
+
     # 0) test history: one entry per item whose status actually changes
     if "test_status" in changes:
         status = changes["test_status"].value if hasattr(changes["test_status"], "value") else changes["test_status"]
@@ -156,13 +193,33 @@ def apply_bulk(session: Session, body: BulkIn) -> BulkOut:
         )
 
     # 1) plain column changes for everything selected
-    values = {k: (v.value if hasattr(v, "value") else v) for k, v in changes.items() if k not in ("location_id", "verified")}
+    values = {
+        k: (v.value if hasattr(v, "value") else v)
+        for k, v in changes.items()
+        if k not in ("location_id", "verified", "attributes", "status_note")
+    }
+    if "status" in changes:
+        # A new status ends the old one's note and takes the item out of any build.
+        values["status_note"] = changes.get("status_note")
+        values["installed_in_id"] = None
+    elif "status_note" in changes:
+        values["status_note"] = changes["status_note"]
     if "verified" in changes:
         values["verified_on"] = func.current_date() if changes["verified"] else None
     if values:
         session.execute(
             update(Item).where(Item.id == any_(_ids_param(ids))).values(**values, updated_at=func.now()),
             execution_options={"synchronize_session": False},
+        )
+
+    if changes.get("attributes"):
+        removed = [k for k, v in changes["attributes"].items() if v is None]
+        added = {k: v for k, v in changes["attributes"].items() if v is not None}
+        session.execute(
+            text(
+                "UPDATE items SET attributes = (attributes || CAST(:added AS jsonb)) - CAST(:removed AS text[]),"
+                " updated_at = now() WHERE id = ANY(:ids)"
+            ).bindparams(_ids_param(ids), added=json.dumps(added), removed=removed)
         )
 
     # 2) the move, with its position rule

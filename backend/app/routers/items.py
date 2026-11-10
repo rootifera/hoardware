@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.enums import Condition, IdentificationConfidence, TestStatus
-from app.models import Category, Item, ItemFile, Location, Photo, ReferenceModel, TestLog
+from app.enums import Condition, IdentificationConfidence, ItemStatus, TestStatus
+from app.models import Category, Item, ItemFile, ItemHistory, Location, Photo, ReferenceModel, TestLog
 from app.pagination import apply_keyset, encode_cursor, decode_cursor
 from app.routers.files import file_out
 from app.schemas import (
@@ -18,13 +18,17 @@ from app.schemas import (
     ItemBatchOut,
     ItemCreate,
     ItemDetail,
+    ItemHistoryOut,
+    ItemRef,
     ItemSummary,
     ItemUpdate,
     Page,
     PhotoOut,
     ScanMatch,
+    SplitIn,
 )
 from app.services import items as item_service
+from app.services import lifecycle
 from app.services import reference as reference_service
 from app.services.testlog import log_test
 from app.services.items import ItemFilters
@@ -82,6 +86,8 @@ SUMMARY_COLUMNS = (
     Item.quantity,
     Item.low_stock_level,
     Item.barcode,
+    Item.status,
+    Item.status_note,
     Item.created_at,
     Item.updated_at,
     Item.sort_name,
@@ -105,6 +111,9 @@ DETAIL_COLUMNS = SUMMARY_COLUMNS + (
     Item.verified_on,
     Item.reference_model_id,
     Item.attributes,
+    Item.installed_in_id,
+    Item.price,
+    Item.source,
 )
 
 
@@ -121,6 +130,10 @@ def _filters(
     never_verified: bool = False,
     verified_before: date | None = None,
     low_stock: bool = False,
+    status: Annotated[list[ItemStatus] | None, Query()] = None,
+    spec_key: Annotated[str | None, Query(max_length=100)] = None,
+    spec_op: Annotated[str, Query(pattern="^(eq|min|max)$")] = "eq",
+    spec_value: Annotated[str | None, Query(max_length=300)] = None,
 ) -> ItemFilters:
     return ItemFilters(
         q=q.strip() if q else None,
@@ -135,6 +148,10 @@ def _filters(
         never_verified=never_verified,
         verified_before=verified_before,
         low_stock=low_stock,
+        statuses=status or [],
+        spec_key=spec_key,
+        spec_op=spec_op,
+        spec_value=spec_value.strip() if spec_value else None,
     )
 
 
@@ -181,6 +198,15 @@ def _with_reference(stmt):
     return stmt.outerjoin(ReferenceModel, ReferenceModel.id == Item.reference_model_id)
 
 
+def _ref(session: Session, item_id: int) -> ItemRef | None:
+    r = session.execute(
+        select(Item.id, Item.inventory_code, Item.manufacturer, Item.model, Category.name)
+        .join(Category, Category.id == Item.category_id)
+        .where(Item.id == item_id)
+    ).first()
+    return ItemRef(id=r[0], inventory_code=r[1], manufacturer=r[2], model=r[3], category_name=r[4]) if r else None
+
+
 def load_detail(session: Session, item_id: int) -> ItemDetail:
     row = session.execute(_with_reference(item_service.base_select(*DETAIL_COLUMNS)).where(Item.id == item_id)).first()
     if row is None:
@@ -192,12 +218,22 @@ def load_detail(session: Session, item_id: int) -> ItemDetail:
     fields = {
         name: getattr(row, name)
         for name in ItemDetail.model_fields
-        if name not in ("thumbnail_url", "photos", "files", "reference", "last_tested_on", "spec_line")
+        if name not in ("thumbnail_url", "photos", "files", "reference", "last_tested_on", "spec_line", "installed_in", "parts")
     }
     reference = session.get(ReferenceModel, row.reference_model_id) if row.reference_model_id else None
     last_tested = session.scalar(select(func.max(TestLog.tested_on)).where(TestLog.item_id == item_id))
+    installed_in = _ref(session, row.installed_in_id) if row.installed_in_id else None
+    parts = session.execute(
+        select(Item.id, Item.inventory_code, Item.manufacturer, Item.model, Category.name)
+        .join(Category, Category.id == Item.category_id)
+        .where(Item.installed_in_id == item_id)
+        .order_by(Category.name, Item.sort_name)
+        .limit(500)
+    ).all()
     return ItemDetail(
         **fields,
+        installed_in=installed_in,
+        parts=[ItemRef(id=r[0], inventory_code=r[1], manufacturer=r[2], model=r[3], category_name=r[4]) for r in parts],
         last_tested_on=last_tested,
         spec_line=_spec_line(row),
         reference=reference_service.detail_of(session, reference) if reference else None,
@@ -234,13 +270,13 @@ def _commit_or_position_conflict(session: Session) -> None:
 def list_items(
     session: SessionDep,
     filters: FiltersDep,
-    sort: Annotated[str, Query(pattern="^(newest|name|category|location|position)$")] = "newest",
+    sort: Annotated[str, Query(pattern="^(newest|name|category|location|position|spec)$")] = "newest",
     order: Annotated[str | None, Query(pattern="^(asc|desc)$")] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     cursor: str | None = None,
     with_total: bool = False,
 ):
-    key_expr, default_desc = item_service.sort_key(sort)
+    key_expr, default_desc = item_service.sort_key(sort, filters.spec_key, order == "desc")
     descending = default_desc if order is None else order == "desc"
 
     if cursor:
@@ -249,6 +285,8 @@ def list_items(
             raise HTTPException(422, "cursor does not match the requested sort")
 
     stmt = item_service.apply_filters(session, _with_reference(item_service.base_select(*SUMMARY_COLUMNS)), filters)
+    if sort == "spec":
+        stmt = stmt.add_columns(key_expr.label("sort_key"))
     stmt = apply_keyset(stmt, key_expr, Item.id, cursor=cursor, descending=descending, limit=limit)
     rows = session.execute(stmt).all()
 
@@ -303,6 +341,9 @@ def create_item(body: ItemCreate, session: SessionDep):
     _check_refs(session, body.category_id, body.location_id, body.reference_model_id)
     item_service.ensure_position_free(session, body.location_id, body.order)
     fields = body.model_dump(mode="json", exclude={"acquired_on"})
+    fields.update(lifecycle.settle(session, {}, {k: fields[k] for k in ("status", "installed_in_id", "status_note") if k in body.model_fields_set}, None))
+    if fields["status"] in lifecycle.GONE_VALUES:
+        fields["order"] = None
     if body.reference_model_id is not None:
         # The match's specs become the item's own (what the user typed wins).
         ref = session.get(ReferenceModel, body.reference_model_id)
@@ -357,6 +398,12 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
             )
 
     fields = template.model_dump(mode="json", exclude={"acquired_on", "order"})
+    fields.update(lifecycle.settle(session, {}, {k: fields[k] for k in ("status", "installed_in_id", "status_note") if k in template.model_fields_set}, None))
+    if fields["status"] in lifecycle.GONE_VALUES and body.order_start is not None:
+        raise HTTPException(422, "sold, scrapped and wished-for items have no location, so no positions either")
+    fields.pop("order", None)  # the copies get their positions below
+    if fields["location_id"] is None:
+        location = None
     if template.reference_model_id is not None:
         ref = session.get(ReferenceModel, template.reference_model_id)
         fields["attributes"] = reference_service.merge_specs(fields["attributes"], reference_service.spec_snapshot(ref))
@@ -386,6 +433,61 @@ def create_items_batch(body: ItemBatchIn, session: SessionDep):
     )
 
 
+@router.get("/{item_id}/history", response_model=list[ItemHistoryOut])
+def item_history(item_id: int, session: SessionDep):
+    """Where the item has been and what state it was in, newest first."""
+    if session.get(Item, item_id) is None:
+        raise HTTPException(404, "item not found")
+    rows = session.scalars(
+        select(ItemHistory).where(ItemHistory.item_id == item_id).order_by(ItemHistory.id.desc()).limit(200)
+    ).all()
+    return [ItemHistoryOut(id=r.id, kind=r.kind, old=r.old, new=r.new, created_at=r.created_at) for r in rows]
+
+
+@router.post("/{item_id}/split", response_model=ItemDetail, status_code=201)
+def split_stock(item_id: int, body: SplitIn, session: SessionDep):
+    """Part of a stock item lives somewhere else: move that many to another location as their own
+    record (same details), leaving the rest where they are."""
+    item = session.scalar(select(Item).where(Item.id == item_id).with_for_update())
+    if item is None:
+        raise HTTPException(404, "item not found")
+    if not item.is_stock:
+        raise HTTPException(409, "only stock items can be split")
+    if body.quantity >= item.quantity:
+        raise HTTPException(409, f"only {item.quantity:,} in stock: leave at least one behind, or just move the item")
+    _check_refs(session, None, body.location_id)
+    if body.location_id == item.location_id:
+        raise HTTPException(422, "choose a different location")
+    item_service.ensure_position_free(session, body.location_id, body.order)
+    clone = Item(
+        **{
+            name: getattr(item, name)
+            for name in (
+                "category_id", "manufacturer", "model", "part_number", "revision", "chipset_manufacturer", "chipset",
+                "condition", "test_status", "test_notes", "is_stock", "low_stock_level", "barcode", "notes", "price",
+                "source", "acquired_on", "reference_model_id", "identification_confidence", "attributes",
+            )
+        },
+        location_id=body.location_id,
+        order=body.order,
+        quantity=body.quantity,
+    )
+    session.add(clone)
+    session.flush()
+    item.quantity -= body.quantity
+    where = _location_label(session, body.location_id)
+    stock_service.record(session, item.id, -body.quantity, item.quantity, f"Moved to {where} as {clone.inventory_code}")
+    stock_service.record(session, clone.id, body.quantity, body.quantity, f"Split from {item.inventory_code}")
+    lifecycle.log(session, clone.id, "location", None, where if body.location_id else None)
+    _commit_or_position_conflict(session)
+    return load_detail(session, clone.id)
+
+
+def _location_label(session: Session, location_id: int | None) -> str:
+    location = session.get(Location, location_id) if location_id else None
+    return location.full_name if location else "no location"
+
+
 @router.get("/{item_id}", response_model=ItemDetail)
 def get_item(item_id: int, session: SessionDep):
     return load_detail(session, item_id)
@@ -397,6 +499,14 @@ def update_item(item_id: int, body: ItemUpdate, session: SessionDep):
     if item is None:
         raise HTTPException(404, "item not found")
     changes = body.model_dump(exclude_unset=True)
+    if "status" in changes:
+        changes["status"] = changes["status"].value
+    before = lifecycle.snapshot(session, item)
+    changes = lifecycle.settle(
+        session, {"status": item.status, "installed_in_id": item.installed_in_id}, changes, item_id
+    ) if {"status", "installed_in_id", "status_note"} & changes.keys() else changes
+    if changes.get("location_id") is not None and changes.get("status", item.status) in lifecycle.GONE_VALUES:
+        raise HTTPException(422, "a sold, scrapped or wished-for item has no location; put it back in the collection first")
     _check_refs(session, changes.get("category_id"), changes.get("location_id"))
     new_location = changes.get("location_id", item.location_id)
     if "location_id" in changes and changes["location_id"] != item.location_id and "order" not in changes:
@@ -412,6 +522,7 @@ def update_item(item_id: int, body: ItemUpdate, session: SessionDep):
         setattr(item, name, value.value if hasattr(value, "value") else value)
     if item.test_status != previous_status:
         log_test(session, item, item.test_status, item.test_notes)
+    lifecycle.record_changes(session, item, before)
     # The history of a stock item also records changes made by editing the quantity itself.
     if item.is_stock and not was_stock and item.quantity:
         stock_service.record(session, item.id, item.quantity, item.quantity, "Started tracking as stock")
@@ -435,6 +546,7 @@ def delete_item(item_id: int, session: SessionDep):
     # try them straight away; anything that fails is retried by storage-gc.
     keys += session.scalars(select(ItemFile.storage_key).where(ItemFile.item_id == item_id)).all()
     queue_deletions(session, keys)
+    lifecycle.release_parts(session, [item_id])
     session.delete(item)
     session.commit()
     if keys:

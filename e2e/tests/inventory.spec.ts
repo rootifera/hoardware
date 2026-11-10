@@ -534,14 +534,15 @@ test("Typing an S-Spec lists the CPU; picking it fills the whole form", async ({
   created.push(newest.id);
   const detail = await (await request.get(`/api/v1/items/${newest.id}`)).json();
   expect(detail.category_name).toBe("CPU");
-  expect(detail.identification_confidence).toBe("confirmed");
+  // A picked suggestion is a candidate until you confirm it yourself.
+  expect(detail.identification_confidence).toBe("candidate");
   expect(detail.reference?.family).toBe("Celeron");
   expect(detail.reference?.specs["L2 cache"]).toBe("128KiB");
   // ...and the specs live on the item itself, not only in the dataset.
   expect(detail.part_number).toBe("BX80524R300128"); // the order code alone...
   expect(detail.attributes).toMatchObject({ "S-Spec": "SL32A", Speed: "300MHz", "Bus speed": "66MHz", "L2 cache": "128KiB", Package: "SEPP Rev. 1", Family: "Celeron" }); // ...and the S-Spec as its own spec
   await page.goto(`/items/${newest.id}`);
-  await expect(page.getByText("Match confirmed").first()).toBeVisible();
+  await expect(page.getByText("Unconfirmed candidate").first()).toBeVisible();
   await expect(page.getByLabel("Part number")).toHaveValue("BX80524R300128");
   await expect(page.getByLabel("S-Spec", { exact: true })).toHaveValue("SL32A");
   await expect(page.getByLabel("Speed", { exact: true })).toHaveValue("300MHz");
@@ -1561,7 +1562,7 @@ test("The original barcode: entered when adding, used by labels and scans, with 
   const qa = page.getByRole("dialog");
   await qa.getByLabel("Model / description").fill(`Boxed ${RUN}`);
   await qa.getByRole("button", { name: "Add barcode" }).click();
-  const field = qa.getByLabel("Barcode");
+  const field = qa.getByLabel("Barcode", { exact: true });
   await field.fill(ean);
   // A scanner presses Enter after the code: that must not save the item.
   await field.press("Enter");
@@ -1572,7 +1573,7 @@ test("The original barcode: entered when adding, used by labels and scans, with 
   const id = Number(page.url().split("/").pop());
   created.push(id);
   expect((await (await request.get(`/api/v1/items/${id}`)).json()).barcode).toBe(ean);
-  await expect(page.getByLabel("Barcode")).toHaveValue(ean);
+  await expect(page.getByLabel("Barcode", { exact: true })).toHaveValue(ean);
 
   // Its label carries the original barcode (with the item's own code in small print)...
   await page.getByRole("button", { name: "More actions" }).click();
@@ -1624,5 +1625,189 @@ test("Add another like this keeps a stock item a stock item, and the stock histo
   const qa = page.getByRole("dialog");
   await expect(qa.getByLabel("Track as stock")).toBeChecked();
   await expect(qa.getByLabel("Model / description")).toHaveValue(`Like stock ${RUN}`);
-  await expect(qa.getByLabel("Barcode")).toHaveCount(0); // a barcode belongs to one packaging: not copied
+  await expect(qa.getByLabel("Barcode", { exact: true })).toHaveCount(0); // a barcode belongs to one packaging: not copied
+});
+
+test("Where an item is now: lend it, install it in a build, and read its history", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const build = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Retro PC ${RUN}` } })).json();
+  const part = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Sound card ${RUN}` } })).json();
+  created.push(build.id, part.id);
+
+  await page.goto(`/items/${part.id}`);
+  const panel = page.getByRole("region", { name: "Where it is now" });
+  await panel.getByRole("combobox", { name: "Status" }).click();
+  await page.getByRole("option", { name: "Lent out" }).click();
+  await panel.getByLabel("Note").fill("Sam");
+  await panel.getByRole("button", { name: "Save status" }).click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+  const lent = await (await request.get(`/api/v1/items/${part.id}`)).json();
+  expect([lent.status, lent.status_note]).toEqual(["lent", "Sam"]);
+  await expect(panel.getByRole("list", { name: "Item history" })).toContainText("In collection → Lent out");
+
+  // The list says so, next to the name.
+  await page.goto(`/?q=${encodeURIComponent(`Sound card ${RUN}`)}`);
+  await expect(page.getByRole("link", { name: new RegExp(`Sound card ${RUN}`) })).toContainText("Lent out: Sam");
+
+  // Install it in the build: the part's page names the build, the build's page lists the part.
+  await page.goto(`/items/${part.id}`);
+  await panel.getByLabel(/^Installed in/).click();
+  await page.getByPlaceholder(/Search by name, code/).fill(`Retro PC ${RUN}`);
+  await page.getByRole("button", { name: new RegExp(`${build.inventory_code} .*Retro PC`) }).click();
+  await expect(panel.getByLabel(/^Installed in/)).toContainText(build.inventory_code);
+  expect((await (await request.get(`/api/v1/items/${part.id}`)).json()).status).toBe("installed");
+  await page.goto(`/items/${build.id}`);
+  await expect(page.getByRole("list", { name: "Parts installed" })).toContainText(`Sound card ${RUN}`);
+
+  // Sold items leave the default list and can be found under their status.
+  await request.patch(`/api/v1/items/${part.id}`, { data: { status: "sold", status_note: "eBay" } });
+  await page.goto(`/?q=${encodeURIComponent(`Sound card ${RUN}`)}`);
+  await expect(page.getByText("Nothing matches these filters")).toBeVisible();
+  await page.getByRole("combobox", { name: "Item status" }).click();
+  await page.getByRole("option", { name: "Sold" }).click();
+  await expect(page.getByRole("link", { name: new RegExp(`Sound card ${RUN}`) })).toContainText("Sold: eBay");
+});
+
+test("Wishlist: add something you are looking for, with no location", async ({ page, request }) => {
+  const model = `Voodoo 5 6000 ${RUN}`;
+  await page.goto("/");
+  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
+  await page.keyboard.press("n");
+  const qa = page.getByRole("dialog");
+  await qa.getByLabel("Model / description").fill(model);
+  await qa.getByLabel("On my wishlist (not owned yet)").check();
+  await expect(qa.getByLabel("Location")).toBeHidden();
+  await qa.getByRole("button", { name: "Save & edit" }).click();
+  await page.waitForURL(/\/items\/\d+$/);
+  const id = Number(page.url().split("/").pop());
+  created.push(id);
+  const saved = await (await request.get(`/api/v1/items/${id}`)).json();
+  expect([saved.status, saved.location_id]).toEqual(["wanted", null]);
+  // Not among what you own, but under Wishlist.
+  await page.goto(`/?q=${encodeURIComponent(model)}`);
+  await expect(page.getByRole("link", { name: new RegExp(model) })).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Item status" }).click();
+  await page.getByRole("option", { name: "Wishlist" }).click();
+  await expect(page.getByRole("link", { name: new RegExp(model) })).toContainText("Wishlist");
+});
+
+test("Stock in two places: move part of it to another location", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const a = await (await request.post("/api/v1/locations", { data: { name: `Drawer A ${RUN}` } })).json();
+  const b = await (await request.post("/api/v1/locations", { data: { name: `Drawer B ${RUN}` } })).json();
+  locationIds.push(a.id, b.id);
+  const item = await (
+    await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Resistor ${RUN}`, is_stock: true, quantity: 100, location_id: a.id } })
+  ).json();
+  created.push(item.id);
+
+  await page.goto(`/items/${item.id}`);
+  await page.getByRole("button", { name: /Some of these are somewhere else/ }).click();
+  const form = page.getByRole("form", { name: "Move part of the stock" });
+  await form.getByLabel("How many").fill("30");
+  await form.getByRole("button", { name: "Choose a location" }).click();
+  await chooseLocation(page, `drawer b ${RUN}`, new RegExp(`Drawer B ${RUN}`));
+  await form.getByRole("button", { name: "Move", exact: true }).click();
+  await page.waitForURL((u) => /\/items\/\d+$/.test(u.pathname) && !u.pathname.endsWith(`/${item.id}`));
+  const newId = Number(page.url().split("/").pop());
+  created.push(newId);
+  const moved = await (await request.get(`/api/v1/items/${newId}`)).json();
+  expect([moved.quantity, moved.location_id]).toEqual([30, b.id]);
+  expect((await (await request.get(`/api/v1/items/${item.id}`)).json()).quantity).toBe(70);
+});
+
+test("Filter and sort by a spec: numbers understand their units", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const key = `Clock${RUN.replace(/[^a-z]/gi, "")}`;
+  for (const [name, speed] of [["Slow", "66 MHz"], ["Mid", "133MHz"], ["Fast", "1.2GHz"]]) {
+    const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `Spec ${name} ${RUN}`, attributes: { [key]: speed } } })).json();
+    created.push(item.id);
+  }
+  await page.goto(`/?q=${encodeURIComponent(`Spec ${RUN}`)}`);
+  const rows = page.getByRole("link", { name: new RegExp(`Spec (Slow|Mid|Fast) ${RUN}`) });
+  await expect(rows).toHaveCount(3);
+  const spec = page.getByRole("group", { name: "Filter by spec" });
+  await spec.getByRole("combobox", { name: "Spec" }).click();
+  await page.getByRole("option", { name: key, exact: true }).click();
+  await spec.getByRole("combobox", { name: "Spec comparison" }).click();
+  await page.getByRole("option", { name: "at least" }).click();
+  await spec.getByLabel("Spec value").fill("100MHz");
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByRole("link", { name: new RegExp(`Spec Slow ${RUN}`) })).toHaveCount(0);
+  // Sorted by that spec, smallest first.
+  await page.getByRole("combobox", { name: "Sort by" }).click();
+  await page.getByRole("option", { name: `${key} value` }).click();
+  await expect(rows.first()).toContainText(`Spec Mid ${RUN}`);
+  await expect(rows.last()).toContainText(`Spec Fast ${RUN}`);
+});
+
+test("Bulk: set the status and a spec on the selected items", async ({ page, request }) => {
+  const cats = await (await request.get("/api/v1/categories")).json();
+  const prefix = `Bulk life ${RUN}`;
+  const ids: number[] = [];
+  for (let i = 0; i < 2; i++) {
+    const item = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `${prefix} ${i}` } })).json();
+    ids.push(item.id);
+    created.push(item.id);
+  }
+  await page.goto(`/?q=${encodeURIComponent(prefix)}`);
+  const boxes = page.getByRole("checkbox", { name: /^Select [A-Z0-9]+-\d+/ });
+  await expect(boxes).toHaveCount(2);
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  const bar = page.getByRole("region", { name: "Bulk actions" });
+  await bar.getByRole("button", { name: "Spec…" }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Spec name").fill("Socket");
+  await dialog.getByLabel("Spec value").fill("Socket 7");
+  await dialog.getByRole("button", { name: "Set spec" }).click();
+  await expect(page.getByText("Updated 2 items")).toBeVisible();
+  for (const id of ids) expect((await (await request.get(`/api/v1/items/${id}`)).json()).attributes.Socket).toBe("Socket 7");
+
+  await bar.getByRole("button", { name: "Status…" }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox", { name: "Status" }).click();
+  await page.getByRole("option", { name: "Sold" }).click();
+  await dialog.getByLabel("Note").fill("job lot");
+  await dialog.getByRole("button", { name: "Set status" }).click();
+  for (const id of ids) {
+    await expect
+      .poll(async () => {
+        const item = await (await request.get(`/api/v1/items/${id}`)).json();
+        return [item.status, item.status_note];
+      })
+      .toEqual(["sold", "job lot"]);
+  }
+});
+
+test("Location labels: print one for a box, and scanning it opens the box", async ({ page, request }) => {
+  const box = await (await request.post("/api/v1/locations", { data: { name: `Scan box ${RUN}`, type: "Box" } })).json();
+  locationIds.push(box.id);
+  const code = `LOC-${String(box.id).padStart(6, "0")}`;
+  await page.goto(`/locations?id=${box.id}`);
+  await page.getByRole("link", { name: "Label" }).click();
+  await expect(page).toHaveURL(new RegExp(`/labels\\?locations=${box.id}$`));
+  const label = page.getByTestId("label");
+  await expect(label).toHaveCount(1);
+  await expect(label.getByRole("img", { name: `Barcode ${code}` })).toBeVisible();
+  await expect(label).toContainText(`Scan box ${RUN}`);
+
+  // A scanner types the code in a burst and presses Enter, anywhere.
+  await page.goto("/categories");
+  await expect(page.getByRole("heading", { name: "Categories" }).first()).toBeVisible();
+  await page.keyboard.type(code, { delay: 5 });
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/locations?id=${box.id}`);
+  await expect(page.getByText(`Opened Scan box ${RUN}`)).toBeVisible();
+  // In the search box too.
+  await page.goto("/");
+  await page.locator("#search-input").fill(code.toLowerCase());
+  await page.locator("#search-input").press("Enter");
+  await page.waitForURL(`**/locations?id=${box.id}`);
+  // A location code that nobody has is reported.
+  await page.goto("/categories");
+  await expect(page.getByRole("heading", { name: "Categories" }).first()).toBeVisible();
+  await page.keyboard.type("LOC-999999", { delay: 5 });
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("No location has the code LOC-999999")).toBeVisible();
 });

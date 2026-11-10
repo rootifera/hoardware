@@ -1,4 +1,5 @@
 import csv
+import dataclasses
 import io
 import json
 import logging
@@ -130,6 +131,10 @@ EXPORT_COLUMNS = [
     "position",
     "quantity",
     "barcode",
+    "item_status",
+    "status_note",
+    "price",
+    "source",
     "notes",
     "acquired_on",
     "verified_on",
@@ -157,7 +162,13 @@ def items_csv_response(filters, ids: list[int] | None = None) -> StreamingRespon
     from sqlalchemy import BigInteger, any_, bindparam
     from sqlalchemy.dialects.postgresql import ARRAY
 
+    from app.enums import ItemStatus
     from app.models import Category, Location
+
+    # An export is a copy of your data: sold, scrapped and wishlist items are included unless a
+    # status was chosen. (The list screen hides them by default; a backup must not.)
+    if not filters.statuses:
+        filters = dataclasses.replace(filters, statuses=list(ItemStatus))
 
     def rows() -> Iterator[str]:
         buffer = io.StringIO()
@@ -183,6 +194,10 @@ def items_csv_response(filters, ids: list[int] | None = None) -> StreamingRespon
                     Item.order,
                     case((Item.is_stock, Item.quantity), else_=None),
                     Item.barcode,
+                    Item.status,
+                    Item.status_note,
+                    Item.price,
+                    Item.source,
                     Item.notes,
                     Item.acquired_on,
                     Item.verified_on,

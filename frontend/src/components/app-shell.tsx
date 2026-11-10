@@ -4,11 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Cpu, Keyboard, LogOut, Moon, Plus, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { AUTH_KEY } from "@/components/auth-gate";
 import { useQuickAdd } from "@/components/quick-add";
+import { ScanIntoField } from "@/components/camera-scanner";
 import { ScanListener } from "@/components/scan-listener";
+import { resolveScan } from "@/lib/scan-open";
 import { SETUP_KEY } from "@/components/setup-gate";
 import { VersionTag } from "@/components/version-tag";
 import { Button } from "@/components/ui/button";
@@ -123,6 +126,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <ScanIntoField
+              label="Scan a barcode with the camera"
+              onResult={(code) =>
+                resolveScan(code)
+                  .then((r) => {
+                    if (r.kind === "none") return toast.error(r.message);
+                    toast.success(r.message);
+                    router.push(r.href);
+                  })
+                  .catch(() => toast.error("The scan could not be looked up"))
+              }
+            />
             <Button aria-label="Quick add" onClick={() => open()}>
               <Plus /> <span className="hidden sm:inline">Quick add</span>
               <kbd className="ml-1 hidden rounded bg-primary-foreground/20 px-1 font-mono text-[10px] sm:inline">N</kbd>

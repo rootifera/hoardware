@@ -156,6 +156,9 @@ function LocationPanel({ id, onSelect, onEdit, onAddChild }: { id: number; onSel
             >
               <Printer /> Print list
             </Button>
+            <Button variant="outline" size="sm" render={<Link href={`/labels?locations=${id}`} />} title="A barcode label for this box or shelf: scanning it opens what is inside">
+              <Printer /> Label
+            </Button>
             <Button variant="outline" size="sm" disabled={!itemCount.data} onClick={() => setMoveAll(true)}>
               <ArrowRightLeft /> Move all items…
             </Button>

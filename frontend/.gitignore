@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# the barcode decoder, copied from node_modules by scripts/copy-wasm.mjs
+/public/vendor/
+
 # production
 /build
 

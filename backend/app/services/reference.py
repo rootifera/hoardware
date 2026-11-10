@@ -21,9 +21,10 @@ from app.schemas import (
 HIGHLIGHT_SPECS: dict[str, list[str]] = {
     "cpu": ["Frequency(internal max/typ)", "Bus speed", "L2 cache", "Package", "Socket", "Core", "CPUID", "Core Stepping"],
     "gpu": ["GPU chip", "Memory size", "Memory type", "Memory bus", "Bus", "GPU clock", "Released"],
+    "pci": ["PCI ID"],
 }
 
-_SOURCE_LABELS = {"cpu-db": "CPU-DB", "gpus-specs": "GPUs-Specs"}
+_SOURCE_LABELS = {"cpu-db": "CPU-DB", "gpus-specs": "GPUs-Specs", "pci-ids": "PCI ID Repository"}
 
 
 def kind_for_category(name: str | None) -> str | None:
@@ -34,6 +35,9 @@ def kind_for_category(name: str | None) -> str | None:
         return "cpu"
     if re.search(r"gpu|vga|graphics|video", name, re.I):
         return "gpu"
+    # Expansion cards that have PCI IDs. (ISA and other old cards have none; those are filled in by hand.)
+    if re.search(r"sound|audio|network|ethernet|\blan\b|nic\b|scsi|raid|usb|modem|capture|tuner|controller|pci", name, re.I):
+        return "pci"
     return None
 
 
@@ -177,6 +181,8 @@ def _ref_spec_line(ref: ReferenceModel) -> str:
     s = ref.specs
     if ref.kind == "gpu":
         return gpu_spec_line_of(s.get("GPU chip"), s.get("Memory size"), s.get("Memory type"), s.get("Bus"), s.get("GPU clock"))
+    if ref.kind == "pci":
+        return s.get("PCI ID") or ""
     return spec_line_of(
         s.get("Frequency(internal max/typ)"), s.get("Bus speed"), s.get("L2 cache"), s.get("Package"), s.get("S-Spec")
     )
