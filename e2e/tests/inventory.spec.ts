@@ -1668,27 +1668,40 @@ test("Where an item is now: lend it, install it in a build, and read its history
   await expect(page.getByRole("link", { name: new RegExp(`Sound card ${RUN}`) })).toContainText("Sold: eBay");
 });
 
-test("Wishlist: add something you are looking for, with no location", async ({ page, request }) => {
+test("Wishlist: add what you are looking for, then convert it to inventory when you get it", async ({ page, request }) => {
   const model = `Voodoo 5 6000 ${RUN}`;
   await page.goto("/");
-  await expect(page.getByText(/^\d[\d,]* items?$|^No items yet$/)).toBeVisible();
-  await page.keyboard.press("n");
-  const qa = page.getByRole("dialog");
-  await qa.getByLabel("Model / description").fill(model);
-  await qa.getByLabel("On my wishlist (not owned yet)").check();
-  await expect(qa.getByLabel("Location")).toBeHidden();
-  await qa.getByRole("button", { name: "Save & edit" }).click();
-  await page.waitForURL(/\/items\/\d+$/);
-  const id = Number(page.url().split("/").pop());
-  created.push(id);
-  const saved = await (await request.get(`/api/v1/items/${id}`)).json();
-  expect([saved.status, saved.location_id]).toEqual(["wanted", null]);
-  // Not among what you own, but under Wishlist.
+  await page.getByRole("link", { name: "Wishlist" }).click();
+  await expect(page).toHaveURL(/\/wishlist$/);
+  await page.getByRole("button", { name: "Add to wishlist" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("What are you looking for?").fill(model);
+  await dialog.getByLabel("Where to look (optional)").fill("eBay");
+  await dialog.getByRole("button", { name: "Add to wishlist" }).click();
+  const row = page.getByRole("link", { name: new RegExp(model) });
+  await expect(row).toBeVisible();
+  const found = (await (await request.get(`/api/v1/items?status=wanted&q=${encodeURIComponent(model)}`)).json()).items[0];
+  created.push(found.id);
+  expect([found.status, found.location_id]).toEqual(["wanted", null]);
+
+  // Not among what you own.
   await page.goto(`/?q=${encodeURIComponent(model)}`);
-  await expect(page.getByRole("link", { name: new RegExp(model) })).toHaveCount(0);
-  await page.getByRole("combobox", { name: "Item status" }).click();
-  await page.getByRole("option", { name: "Wishlist" }).click();
-  await expect(page.getByRole("link", { name: new RegExp(model) })).toContainText("Wishlist");
+  await expect(page.getByText("Nothing matches these filters")).toBeVisible();
+
+  // Got it: it becomes an ordinary inventory item with what you paid.
+  await page.goto(`/items/${found.id}`);
+  await expect(page.getByRole("region", { name: "On your wishlist" })).toBeVisible();
+  await page.getByRole("button", { name: "Got it: add to inventory" }).click();
+  const got = page.getByRole("dialog");
+  await got.getByLabel("Price paid").fill("45.5");
+  await got.getByRole("button", { name: "Add to inventory" }).click();
+  await expect(page.getByRole("region", { name: "Where it is now" })).toBeVisible();
+  const owned = await (await request.get(`/api/v1/items/${found.id}`)).json();
+  expect([owned.status, owned.price, owned.source]).toEqual(["in_collection", 45.5, "eBay"]);
+  await page.goto(`/?q=${encodeURIComponent(model)}`);
+  await expect(page.getByRole("link", { name: new RegExp(model) })).toBeVisible();
+  await page.goto("/wishlist");
+  await expect(page.getByText("Your wishlist is empty")).toBeVisible();
 });
 
 test("Stock in two places: move part of it to another location", async ({ page, request }) => {

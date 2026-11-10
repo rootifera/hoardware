@@ -9,7 +9,7 @@ export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
   wanted: "Wishlist",
 };
 /** What you can set on the item page. "Installed" comes from choosing a build. */
-export const SETTABLE_STATUSES: ItemStatus[] = ["in_collection", "lent", "sold", "scrapped", "wanted"];
+export const SETTABLE_STATUSES: ItemStatus[] = ["in_collection", "lent", "sold", "scrapped"];
 /** Sold, scrapped and wished-for items have no place on a shelf. */
 export const GONE_STATUSES: ItemStatus[] = ["sold", "scrapped", "wanted"];
 

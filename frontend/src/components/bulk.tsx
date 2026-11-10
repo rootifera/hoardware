@@ -235,7 +235,7 @@ function NotesDialog({ open, onClose, onApply }: { open: boolean; onClose: () =>
   );
 }
 
-/** Set the status (lent, sold, wishlist…) of the selected items, with an optional note. */
+/** Set the status (lent, sold…) of the selected items, with an optional note. */
 function StatusDialog({ open, onClose, onApply }: { open: boolean; onClose: () => void; onApply: (status: ItemStatus, note: string | null) => void }) {
   const [status, setStatus] = useState<ItemStatus>("lent");
   const [note, setNote] = useState("");
@@ -245,7 +245,7 @@ function StatusDialog({ open, onClose, onApply }: { open: boolean; onClose: () =
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Set status</DialogTitle>
-          <DialogDescription>Sold, scrapped and wishlist items are taken off their shelf; the history remembers where they were.</DialogDescription>
+          <DialogDescription>Sold and scrapped items are taken off their shelf; the history remembers where they were.</DialogDescription>
         </DialogHeader>
         {open && (
           <div className="grid gap-3">

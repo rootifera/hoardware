@@ -149,7 +149,7 @@ function ItemRow({
   );
 }
 
-export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?: () => void }) {
+export function ItemList({ filters, onClear, empty }: { filters: ItemFilters; onClear?: () => void; empty?: React.ReactNode }) {
   const { open: openQuickAdd } = useQuickAdd();
   const query = useInfiniteQuery({
     queryKey: ["items", filters],
@@ -252,6 +252,7 @@ export function ItemList({ filters, onClear }: { filters: ItemFilters; onClear?:
     );
   }
 
+  if (items.length === 0 && empty && !filters.q.trim()) return <>{empty}</>;
   if (items.length === 0) {
     const filtered = hasActiveFilters(filters);
     return (
