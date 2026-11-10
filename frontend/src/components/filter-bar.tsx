@@ -261,7 +261,7 @@ export function FilterBar({
           value={filters.status}
           onChange={(status) => setFilters({ status })}
           anyLabel="What I own"
-          options={[...ITEM_STATUSES.map((s) => ({ value: s, label: ITEM_STATUS_LABELS[s] })), { value: "all", label: "Everything" }]}
+          options={[...ITEM_STATUSES.filter((s) => s !== "wanted").map((s) => ({ value: s, label: ITEM_STATUS_LABELS[s] })), { value: "all", label: "Everything" }]}
         />
         {offers("confidence") && (
           <SimpleSelect

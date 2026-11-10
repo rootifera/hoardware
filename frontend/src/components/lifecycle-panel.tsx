@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ItemPicker } from "@/components/item-picker";
 import { SimpleSelect } from "@/components/simple-select";
 import { Button } from "@/components/ui/button";
+import { GotItDialog } from "@/components/wishlist";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { GONE_STATUSES, ITEM_STATUS_LABELS, SETTABLE_STATUSES, type ItemDetail, type ItemHistoryEntry, type ItemStatus, type ItemUpdate } from "@/lib/types";
@@ -48,6 +49,21 @@ export function LifecyclePanel({ item, locked }: { item: ItemDetail; locked: boo
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const [gotIt, setGotIt] = useState(false);
+  if (item.status === "wanted") {
+    return (
+      <section aria-label="On your wishlist" className="rounded-xl border bg-card p-5 sm:p-6">
+        <h2 className="text-base font-semibold tracking-tight">On your wishlist</h2>
+        <p className="mt-1 text-sm text-muted-foreground">You do not own this yet. When you have it, move it into your inventory.</p>
+        <Button className="mt-3" disabled={locked} onClick={() => setGotIt(true)}>
+          Got it: add to inventory
+        </Button>
+        {locked && <p className="mt-2 text-xs text-muted-foreground">You have unsaved changes on this page. Save or revert them first.</p>}
+        <GotItDialog item={item} open={gotIt} onClose={() => setGotIt(false)} />
+      </section>
+    );
+  }
 
   const changed = status !== item.status || (note.trim() || null) !== item.status_note;
   const options = (item.status === "installed" ? (["installed", ...SETTABLE_STATUSES] as ItemStatus[]) : SETTABLE_STATUSES).map((s) => ({

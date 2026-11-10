@@ -206,8 +206,6 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
   // The category decides which standard fields this form shows and what they are called.
   const shown = (k: CoreKey) => coreShown(currentCategory, k);
   // "Track as stock": counted items (take out / add). Starts as the category's default; ticking it overrides.
-  // On the wishlist: something to look for, not owned yet (no location).
-  const [wishlist, setWishlist] = useState(false);
   const [stockOverride, setStockOverride] = useState<boolean | null>(preset?.isStock ? true : null);
   const isStock = stockOverride ?? coreShown(currentCategory, "stock");
   const label = (k: CoreKey, fallback: string) => coreLabel(currentCategory, k, fallback);
@@ -308,7 +306,6 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         test_status: testStatus,
         notes: notes.trim() || null,
         ...(barcode.trim() ? { barcode: barcode.trim() } : {}),
-        ...(wishlist ? { status: "wanted" as const } : {}),
         ...(isStock ? { is_stock: true, quantity: Number(quantity.trim() === "" ? "1" : quantity) } : {}),
       };
       if (isStock && (!Number.isInteger(fields.quantity) || (fields.quantity ?? 0) < 0)) {
@@ -316,7 +313,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
         return setError(`${label("stock", "Quantity")} must be a whole number, 0 or more.`);
       }
       // A position is the item's exact spot inside the location.
-      const start = wishlist || position.trim() === "" ? null : Number(position);
+      const start = position.trim() === "" ? null : Number(position);
       if (start !== null && (!Number.isInteger(start) || start < 0)) {
         setSaving(false);
         return setError("Position must be a whole number, 0 or more.");
@@ -331,12 +328,12 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
       const batch =
         copies > 1
           ? await api.createItemsBatch({
-              item: { ...fields, ...matched, location_id: wishlist ? null : (location?.id ?? null) },
+              item: { ...fields, ...matched, location_id: location?.id ?? null },
               copies,
               order_start: start,
             })
           : null;
-      const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: wishlist ? null : (location?.id ?? null), order: start });
+      const item = batch ? null : await api.createItem({ ...fields, ...matched, location_id: location?.id ?? null, order: start });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ category: effectiveCategory, location } satisfies Remembered));
       // The item is saved either way. A failed upload must not go unnoticed, so it gets its own
       // lasting message saying what failed and why.
@@ -669,7 +666,7 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
           )}
         </div>
       )}
-      <div className={`grid gap-4 sm:grid-cols-[1fr_10rem]${wishlist ? " hidden" : ""}`}>
+      <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
         <div className="grid gap-1.5">
           <Label htmlFor="qa-location">Location</Label>
           <LocationPicker
@@ -714,10 +711,6 @@ function QuickAddForm({ preset, onClose }: { preset?: QuickAddPreset; onClose: (
             }}
           />
           Track as stock
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm" title="Something you are looking for: it is listed under Wishlist, with no location">
-          <input type="checkbox" className="size-4 accent-primary" checked={wishlist} onChange={(e) => setWishlist(e.target.checked)} />
-          On my wishlist (not owned yet)
         </label>
         {/* A stock item is one record that says "100 of them", so several separate items is not offered. */}
         {!isStock &&

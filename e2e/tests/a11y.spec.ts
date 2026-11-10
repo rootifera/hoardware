@@ -97,6 +97,23 @@ test.describe("accessibility", () => {
     await audit(page, "the bulk spec dialog");
   });
 
+  test("wishlist page and its dialogs", async ({ page, request }) => {
+    const cats = await (await request.get("/api/v1/categories")).json();
+    const wish = await (await request.post("/api/v1/items", { data: { category_id: cats[0].id, model: `A11y wish ${RUN}`, status: "wanted" } })).json();
+    itemIds.push(wish.id);
+    await page.goto("/wishlist");
+    await expect(page.getByRole("link", { name: new RegExp(`A11y wish ${RUN}`) })).toBeVisible();
+    await audit(page, "wishlist");
+    await page.getByRole("button", { name: "Add to wishlist" }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await audit(page, "add to wishlist dialog");
+    await page.keyboard.press("Escape");
+    await page.goto(`/items/${wish.id}`);
+    await page.getByRole("button", { name: "Got it: add to inventory" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await audit(page, "got it dialog");
+  });
+
   test("location label page", async ({ page }) => {
     await page.goto(`/labels?locations=${boxId}`);
     await expect(page.getByTestId("label")).toHaveCount(1);
